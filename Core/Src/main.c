@@ -21,11 +21,32 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "Module_Usb.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef signed char        int8;
+typedef short              int16;
+typedef int                int32;
+typedef long long          int64;
+typedef unsigned char      uint8;
+typedef unsigned short     uint16;
+typedef unsigned int       uint32;
+typedef unsigned long long uint64;
+
+typedef struct
+{
+    uint16_t count_10ms;
+    uint16_t count_100ms;
+    uint16_t count_1000ms;
+
+    volatile uint8_t flag_10ms;
+    volatile uint8_t flag_100ms;
+    volatile uint8_t flag_1000ms;
+} MainTick_t;
+
+volatile MainTick_t g_MainTick;
 
 /* USER CODE END PTD */
 
@@ -40,7 +61,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
+
 
 /* USER CODE BEGIN PV */
 
@@ -49,9 +72,10 @@ TIM_HandleTypeDef htim3;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void Task_Run(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -83,8 +107,12 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_TIM1_Init();
   MX_TIM3_Init();
+  Module_Usb_Init();
   /* USER CODE BEGIN 2 */
+  HAL_TIM_Base_Start_IT(&htim1);
+
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 500);
   /* USER CODE END 2 */
@@ -96,22 +124,67 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    // static uint32_t lastPrintTick = 0;
 
-	//HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-	HAL_Delay(1000);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);
-	HAL_Delay(1000);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+    // if ((HAL_GetTick() - lastPrintTick) >= 1000U)
+    // {
+    //   lastPrintTick = HAL_GetTick();
+    //   printf("hello cdc\r\n");
+    //   HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+    // }
+    Task_Run();
+  }  /* USER CODE END 3 */
+}
 
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
-	HAL_Delay(1000);
-	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
-	HAL_Delay(1000);
+static void Task_Run(void)
+{
+    if (g_MainTick.flag_10ms)
+    {
+        g_MainTick.flag_10ms = 0;
+        // 10ms task
+    }
 
+    if (g_MainTick.flag_100ms)
+    {
+        g_MainTick.flag_100ms = 0;
+        // 100ms task
+        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+    }
 
-  }
-  /* USER CODE END 3 */
+    if (g_MainTick.flag_1000ms)
+    {
+        g_MainTick.flag_1000ms = 0;
+        // 1000ms task
+        Module_Usb_Printf("hello cdc\r\n");
+    }
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM1)
+    {
+        g_MainTick.count_10ms++;
+        g_MainTick.count_100ms++;
+        g_MainTick.count_1000ms++;
+
+        if (g_MainTick.count_10ms >= 10)
+        {
+            g_MainTick.count_10ms = 0;
+            g_MainTick.flag_10ms = 1;
+        }
+
+        if (g_MainTick.count_100ms >= 100)
+        {
+            g_MainTick.count_100ms = 0;
+            g_MainTick.flag_100ms = 1;
+        }
+
+        if (g_MainTick.count_1000ms >= 1000)
+        {
+            g_MainTick.count_1000ms = 0;
+            g_MainTick.flag_1000ms = 1;
+        }
+    }
 }
 
 /**
@@ -122,32 +195,71 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
+
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB;
+  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+static void MX_TIM1_Init(void)
+{
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  __HAL_RCC_TIM1_CLK_ENABLE();
+
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 71; // 72MHz / 72 = 1MHz
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 999;  // 1MHz / 1000 = 1kHz
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
 }
 
 
@@ -167,7 +279,7 @@ static void MX_TIM3_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 7;
+  htim3.Init.Prescaler = 71;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -265,7 +377,6 @@ static void MX_GPIO_Init(void)
 //}
 
 /* USER CODE BEGIN 4 */
-
 /* USER CODE END 4 */
 
 /**

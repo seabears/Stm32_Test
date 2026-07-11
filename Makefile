@@ -7,21 +7,25 @@ TOOLCHAIN_BIN ?= C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube
 CC := $(TOOLCHAIN_BIN)/arm-none-eabi-gcc
 SIZE := $(TOOLCHAIN_BIN)/arm-none-eabi-size
 OBJDUMP := $(TOOLCHAIN_BIN)/arm-none-eabi-objdump
+OBJCOPY := $(TOOLCHAIN_BIN)/arm-none-eabi-objcopy
 
 OPENOCD ?= C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.openocd.win32_2.3.100.202312181736/tools/bin/openocd.exe
 OPENOCD_SCRIPTS ?= C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.debug.openocd_2.2.0.202401261111/resources/openocd/st_scripts
 OPENOCD_INTERFACE ?= interface/stlink-dap.cfg
 OPENOCD_TARGET ?= target/stm32f1x.cfg
+DFU_UTIL ?= C:/Users/haewoong/AppData/Local/Arduino15/packages/arduino/tools/dfu-util/0.11.0-arduino5/dfu-util.exe
+BOOTLOADER_BIN ?= Tools/Bootloader/generic_boot20_pc13.bin
 
 RM := rm -rf
 MKDIR := mkdir -p
 
 BUILD_DIR := Debug
 TARGET := stm32f103c8t6
-LINKER_SCRIPT := STM32F103C8TX_FLASH.ld
+LINKER_SCRIPT := STM32F103C8TX_FLASH_BOOTLOADER.ld
 
 C_SRCS := \
 Core/Src/main.c \
+Module_Usb/src/Module_Usb.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
 Core/Src/syscalls.c \
@@ -35,11 +39,22 @@ Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_flash.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_flash_ex.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_gpio.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_gpio_ex.c \
+Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_pcd.c \
+Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_pcd_ex.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_pwr.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc_ex.c \
 Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim.c \
-Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim_ex.c
+Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim_ex.c \
+Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_ll_usb.c \
+Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_core.c \
+Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c \
+Middlewares/ST/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c \
+Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c \
+Module_Usb/src/usb_device.c \
+Module_Usb/src/usbd_cdc_if.c \
+Module_Usb/src/usbd_desc.c \
+Module_Usb/src/usbd_conf.c
 
 ASM_SRCS := \
 Core/Startup/startup_stm32f103c8tx.s
@@ -50,6 +65,7 @@ OBJS := $(C_OBJS) $(ASM_OBJS)
 DEPS := $(OBJS:.o=.d)
 
 ELF := $(BUILD_DIR)/$(TARGET).elf
+BIN := $(BUILD_DIR)/$(TARGET).bin
 MAP := $(BUILD_DIR)/$(TARGET).map
 LIST := $(BUILD_DIR)/$(TARGET).list
 OBJECTS_LIST := $(BUILD_DIR)/objects.list
@@ -59,6 +75,9 @@ CPU_FLAGS := -mcpu=cortex-m3 -mfloat-abi=soft -mthumb
 DEFINES := -DDEBUG -DUSE_HAL_DRIVER -DSTM32F103xB
 INCLUDES := \
 -ICore/Inc \
+-IModule_Usb/inc \
+-IMiddlewares/ST/STM32_USB_Device_Library/Core/Inc \
+-IMiddlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc \
 -IDrivers/STM32F1xx_HAL_Driver/Inc/Legacy \
 -IDrivers/STM32F1xx_HAL_Driver/Inc \
 -IDrivers/CMSIS/Device/ST/STM32F1xx/Include \
@@ -68,7 +87,7 @@ CFLAGS := $(CPU_FLAGS) -std=gnu11 -g3 $(DEFINES) -c $(INCLUDES) -O0 -ffunction-s
 ASFLAGS := $(CPU_FLAGS) -g3 -DDEBUG -c -x assembler-with-cpp --specs=nano.specs
 LDFLAGS := $(CPU_FLAGS) -T"$(LINKER_SCRIPT)" --specs=nosys.specs -Wl,-Map="$(MAP)" -Wl,--gc-sections -static --specs=nano.specs -Wl,--start-group -lc -lm -Wl,--end-group
 
-.PHONY: all main-build clean secondary-outputs flash reset halt
+.PHONY: all main-build clean secondary-outputs flash flash-bootloader usb-flash usb-flash-wait reset halt
 
 all: main-build
 
@@ -101,10 +120,24 @@ $(LIST): $(ELF) Makefile
 	@echo 'Finished building: $(notdir $@)'
 	@echo ' '
 
-secondary-outputs: $(SIZE_OUTPUT) $(LIST)
+$(BIN): $(ELF) Makefile
+	$(OBJCOPY) -O binary "$(ELF)" "$(BIN)"
+	@echo 'Finished building: $(notdir $@)'
+	@echo ' '
+
+secondary-outputs: $(SIZE_OUTPUT) $(LIST) $(BIN)
 
 flash: $(ELF)
 	$(OPENOCD) -s "$(OPENOCD_SCRIPTS)" -f $(OPENOCD_INTERFACE) -f $(OPENOCD_TARGET) -c "program $(ELF) verify reset exit"
+
+flash-bootloader: $(BOOTLOADER_BIN)
+	$(OPENOCD) -s "$(OPENOCD_SCRIPTS)" -f $(OPENOCD_INTERFACE) -f $(OPENOCD_TARGET) -c "program $(BOOTLOADER_BIN) 0x08000000 verify reset exit"
+
+usb-flash: $(BIN)
+	$(DFU_UTIL) -d 1EAF:0003 -a 2 -D "$(BIN)"
+
+usb-flash-wait: $(BIN)
+	PowerShell -ExecutionPolicy Bypass -File Tools/Scripts/usb_flash_wait.ps1 -DfuUtil "$(DFU_UTIL)" -Bin "$(BIN)"
 
 reset:
 	$(OPENOCD) -s "$(OPENOCD_SCRIPTS)" -f $(OPENOCD_INTERFACE) -f $(OPENOCD_TARGET) -c "init; reset run; shutdown"

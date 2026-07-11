@@ -57,7 +57,8 @@
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
-
+extern TIM_HandleTypeDef htim1;
+extern PCD_HandleTypeDef hpcd_USB_FS;
 /* USER CODE END EV */
 
 /******************************************************************************/
@@ -199,5 +200,13 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /* USER CODE BEGIN 1 */
+void TIM1_UP_IRQHandler(void)
+{
+  HAL_TIM_IRQHandler(&htim1);
+}
 
+void USB_LP_CAN1_RX0_IRQHandler(void)
+{
+  HAL_PCD_IRQHandler(&hpcd_USB_FS);
+}
 /* USER CODE END 1 */
