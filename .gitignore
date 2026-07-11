@@ -1,0 +1,23 @@
+# Build outputs
+Debug/
+Release/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.o
+*.d
+*.su
+*.cyclo
+
+# STM32CubeIDE local metadata
+.metadata/
+.cubeide-workspace/
+RemoteSystemsTempFiles/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
