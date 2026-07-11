@@ -149,6 +149,7 @@ static void Task_Run(void)
         g_MainTick.flag_100ms = 0;
         // 100ms task
         HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
+        
     }
 
     if (g_MainTick.flag_1000ms)
@@ -156,6 +157,7 @@ static void Task_Run(void)
         g_MainTick.flag_1000ms = 0;
         // 1000ms task
         Module_Usb_Printf("hello cdc\r\n");
+        // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
     }
 }
 

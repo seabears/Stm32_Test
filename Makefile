@@ -14,6 +14,9 @@ OPENOCD_SCRIPTS ?= C:/ST/STM32CubeIDE_1.15.0/STM32CubeIDE/plugins/com.st.stm32cu
 OPENOCD_INTERFACE ?= interface/stlink-dap.cfg
 OPENOCD_TARGET ?= target/stm32f1x.cfg
 DFU_UTIL ?= C:/Users/haewoong/AppData/Local/Arduino15/packages/arduino/tools/dfu-util/0.11.0-arduino5/dfu-util.exe
+DFU_DEVICE ?= 1EAF:0003
+DFU_ALT ?= 0
+DFU_ADDRESS ?= 0x08002000
 BOOTLOADER_BIN ?= Tools/Bootloader/generic_boot20_pc13.bin
 
 RM := rm -rf
@@ -134,10 +137,10 @@ flash-bootloader: $(BOOTLOADER_BIN)
 	$(OPENOCD) -s "$(OPENOCD_SCRIPTS)" -f $(OPENOCD_INTERFACE) -f $(OPENOCD_TARGET) -c "program $(BOOTLOADER_BIN) 0x08000000 verify reset exit"
 
 usb-flash: $(BIN)
-	$(DFU_UTIL) -d 1EAF:0003 -a 2 -D "$(BIN)"
+	$(DFU_UTIL) -d $(DFU_DEVICE) -a $(DFU_ALT) -s $(DFU_ADDRESS) -D "$(BIN)"
 
 usb-flash-wait: $(BIN)
-	PowerShell -ExecutionPolicy Bypass -File Tools/Scripts/usb_flash_wait.ps1 -DfuUtil "$(DFU_UTIL)" -Bin "$(BIN)"
+	PowerShell -ExecutionPolicy Bypass -File Tools/Scripts/usb_flash_wait.ps1 -DfuUtil "$(DFU_UTIL)" -Bin "$(BIN)" -Device "$(DFU_DEVICE)" -Alt $(DFU_ALT) -Address "$(DFU_ADDRESS)"
 
 reset:
 	$(OPENOCD) -s "$(OPENOCD_SCRIPTS)" -f $(OPENOCD_INTERFACE) -f $(OPENOCD_TARGET) -c "init; reset run; shutdown"
