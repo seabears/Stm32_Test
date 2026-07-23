@@ -89,7 +89,7 @@
 USBD_StatusTypeDef USBD_Init(USBD_HandleTypeDef *pdev,
                              USBD_DescriptorsTypeDef *pdesc, uint8_t id)
 {
-  /* Check whether the USB Host handle is valid */
+  /* USB Device 핸들이 유효한지 먼저 확인합니다. NULL이면 이후 상태 접근이 불가능합니다. */
   if (pdev == NULL)
   {
 #if (USBD_DEBUG_LEVEL > 1U)
@@ -104,16 +104,16 @@ USBD_StatusTypeDef USBD_Init(USBD_HandleTypeDef *pdev,
     pdev->pClass = NULL;
   }
 
-  /* Assign USBD Descriptors */
+  /* 호스트의 GET_DESCRIPTOR 요청에 응답할 디스크립터 함수 테이블을 연결합니다. */
   if (pdesc != NULL)
   {
     pdev->pDesc = pdesc;
   }
 
-  /* Set Device initial State */
+  /* USB reset 이후 enumeration을 시작할 수 있도록 장치 상태를 DEFAULT로 초기화합니다. */
   pdev->dev_state = USBD_STATE_DEFAULT;
   pdev->id = id;
-  /* Initialize low level driver */
+  /* 보드/HAL에 종속된 Low-Level 드라이버를 초기화합니다. 이 프로젝트에서는 usbd_conf.c의 PCD 설정으로 내려갑니다. */
   USBD_LL_Init(pdev);
 
   return USBD_OK;
@@ -154,7 +154,7 @@ USBD_StatusTypeDef  USBD_RegisterClass(USBD_HandleTypeDef *pdev, USBD_ClassTypeD
   USBD_StatusTypeDef status = USBD_OK;
   if (pclass != NULL)
   {
-    /* link the class to the USB Device handle */
+    /* CDC, HID, MSC 같은 클래스 드라이버를 USB Device 핸들에 연결합니다. */
     pdev->pClass = pclass;
     status = USBD_OK;
   }
@@ -177,7 +177,7 @@ USBD_StatusTypeDef  USBD_RegisterClass(USBD_HandleTypeDef *pdev, USBD_ClassTypeD
   */
 USBD_StatusTypeDef  USBD_Start(USBD_HandleTypeDef *pdev)
 {
-  /* Start the low level driver  */
+  /* HAL PCD를 시작해 USB pull-up/enumeration이 진행되도록 합니다. */
   USBD_LL_Start(pdev);
 
   return USBD_OK;
@@ -228,7 +228,7 @@ USBD_StatusTypeDef USBD_SetClassConfig(USBD_HandleTypeDef  *pdev, uint8_t cfgidx
 
   if (pdev->pClass != NULL)
   {
-    /* Set configuration  and Start the Class*/
+    /* SET_CONFIGURATION 요청을 받은 뒤 선택된 클래스의 엔드포인트와 내부 상태를 초기화합니다. */
     if (pdev->pClass->Init(pdev, cfgidx) == 0U)
     {
       ret = USBD_OK;
@@ -262,12 +262,14 @@ USBD_StatusTypeDef USBD_ClrClassConfig(USBD_HandleTypeDef  *pdev, uint8_t cfgidx
 */
 USBD_StatusTypeDef USBD_LL_SetupStage(USBD_HandleTypeDef *pdev, uint8_t *psetup)
 {
+  /* EP0로 들어온 8바이트 SETUP 패킷을 bmRequestType, bRequest, wValue 등으로 파싱합니다. */
   USBD_ParseSetupRequest(&pdev->request, psetup);
 
   pdev->ep0_state = USBD_EP0_SETUP;
 
   pdev->ep0_data_len = pdev->request.wLength;
 
+  /* 요청 대상이 장치/인터페이스/엔드포인트 중 어디인지에 따라 표준 요청 처리기를 나눕니다. */
   switch (pdev->request.bmRequest & 0x1FU)
   {
     case USB_REQ_RECIPIENT_DEVICE:
@@ -340,6 +342,7 @@ USBD_StatusTypeDef USBD_LL_DataOutStage(USBD_HandleTypeDef *pdev,
   else if ((pdev->pClass->DataOut != NULL) &&
            (pdev->dev_state == USBD_STATE_CONFIGURED))
   {
+    /* EP0이 아닌 OUT 데이터는 현재 등록된 클래스(CDC)의 DataOut 콜백으로 전달합니다. */
     pdev->pClass->DataOut(pdev, epnum);
   }
   else
@@ -421,6 +424,7 @@ USBD_StatusTypeDef USBD_LL_DataInStage(USBD_HandleTypeDef *pdev,
   else if ((pdev->pClass->DataIn != NULL) &&
            (pdev->dev_state == USBD_STATE_CONFIGURED))
   {
+    /* EP0이 아닌 IN 전송 완료는 현재 등록된 클래스(CDC)의 DataIn 콜백으로 전달합니다. */
     pdev->pClass->DataIn(pdev, epnum);
   }
   else
@@ -441,19 +445,19 @@ USBD_StatusTypeDef USBD_LL_DataInStage(USBD_HandleTypeDef *pdev,
 
 USBD_StatusTypeDef USBD_LL_Reset(USBD_HandleTypeDef *pdev)
 {
-  /* Open EP0 OUT */
+  /* USB reset 이후 제어 전송용 EP0 OUT을 기본 최대 패킷 크기로 다시 엽니다. */
   USBD_LL_OpenEP(pdev, 0x00U, USBD_EP_TYPE_CTRL, USB_MAX_EP0_SIZE);
   pdev->ep_out[0x00U & 0xFU].is_used = 1U;
 
   pdev->ep_out[0].maxpacket = USB_MAX_EP0_SIZE;
 
-  /* Open EP0 IN */
+  /* USB reset 이후 제어 전송용 EP0 IN을 기본 최대 패킷 크기로 다시 엽니다. */
   USBD_LL_OpenEP(pdev, 0x80U, USBD_EP_TYPE_CTRL, USB_MAX_EP0_SIZE);
   pdev->ep_in[0x80U & 0xFU].is_used = 1U;
 
   pdev->ep_in[0].maxpacket = USB_MAX_EP0_SIZE;
 
-  /* Upon Reset call user call back */
+  /* 주소/설정이 아직 부여되지 않은 DEFAULT 상태로 되돌립니다. */
   pdev->dev_state = USBD_STATE_DEFAULT;
   pdev->ep0_state = USBD_EP0_IDLE;
   pdev->dev_config = 0U;
@@ -490,6 +494,7 @@ USBD_StatusTypeDef USBD_LL_SetSpeed(USBD_HandleTypeDef *pdev,
 
 USBD_StatusTypeDef USBD_LL_Suspend(USBD_HandleTypeDef *pdev)
 {
+  /* suspend 전 상태를 저장해 resume 때 원래 상태로 되돌릴 수 있게 합니다. */
   pdev->dev_old_state =  pdev->dev_state;
   pdev->dev_state  = USBD_STATE_SUSPENDED;
 
@@ -588,6 +593,7 @@ USBD_StatusTypeDef USBD_LL_DevConnected(USBD_HandleTypeDef *pdev)
 USBD_StatusTypeDef USBD_LL_DevDisconnected(USBD_HandleTypeDef *pdev)
 {
   /* Free Class Resources */
+  /* 연결이 끊어지면 configured 상태를 해제하고 클래스 리소스를 정리합니다. */
   pdev->dev_state = USBD_STATE_DEFAULT;
   pdev->pClass->DeInit(pdev, (uint8_t)pdev->dev_config);
 

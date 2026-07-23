@@ -151,7 +151,7 @@ __ALIGN_BEGIN static uint8_t USBD_CDC_DeviceQualifierDesc[USB_LEN_DEV_QUALIFIER_
   */
 
 
-/* CDC interface class callbacks structure */
+/* CDC 클래스가 USB Device Core에 제공하는 콜백 테이블입니다. Core 이벤트가 오면 아래 함수들로 분기됩니다. */
 USBD_ClassTypeDef  USBD_CDC =
 {
   USBD_CDC_Init,
@@ -170,7 +170,7 @@ USBD_ClassTypeDef  USBD_CDC =
   USBD_CDC_GetDeviceQualifierDescriptor,
 };
 
-/* USB CDC device Configuration Descriptor */
+/* USB CDC 장치 Configuration Descriptor입니다. 통신 인터페이스 1개와 데이터 인터페이스 1개로 구성됩니다. */
 __ALIGN_BEGIN uint8_t USBD_CDC_CfgHSDesc[USB_CDC_CONFIG_DESC_SIZ] __ALIGN_END =
 {
   /*Configuration Descriptor*/
@@ -266,7 +266,7 @@ __ALIGN_BEGIN uint8_t USBD_CDC_CfgHSDesc[USB_CDC_CONFIG_DESC_SIZ] __ALIGN_END =
 } ;
 
 
-/* USB CDC device Configuration Descriptor */
+/* USB CDC 장치 Configuration Descriptor입니다. 통신 인터페이스 1개와 데이터 인터페이스 1개로 구성됩니다. */
 __ALIGN_BEGIN uint8_t USBD_CDC_CfgFSDesc[USB_CDC_CONFIG_DESC_SIZ] __ALIGN_END =
 {
   /*Configuration Descriptor*/
@@ -475,13 +475,13 @@ static uint8_t  USBD_CDC_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
 
   if (pdev->dev_speed == USBD_SPEED_HIGH)
   {
-    /* Open EP IN */
+    /* 호스트로 데이터를 보내는 Bulk IN 엔드포인트를 엽니다. */
     USBD_LL_OpenEP(pdev, CDC_IN_EP, USBD_EP_TYPE_BULK,
                    CDC_DATA_HS_IN_PACKET_SIZE);
 
     pdev->ep_in[CDC_IN_EP & 0xFU].is_used = 1U;
 
-    /* Open EP OUT */
+    /* 호스트에서 데이터를 받는 Bulk OUT 엔드포인트를 엽니다. */
     USBD_LL_OpenEP(pdev, CDC_OUT_EP, USBD_EP_TYPE_BULK,
                    CDC_DATA_HS_OUT_PACKET_SIZE);
 
@@ -490,19 +490,19 @@ static uint8_t  USBD_CDC_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
   }
   else
   {
-    /* Open EP IN */
+    /* 호스트로 데이터를 보내는 Bulk IN 엔드포인트를 엽니다. */
     USBD_LL_OpenEP(pdev, CDC_IN_EP, USBD_EP_TYPE_BULK,
                    CDC_DATA_FS_IN_PACKET_SIZE);
 
     pdev->ep_in[CDC_IN_EP & 0xFU].is_used = 1U;
 
-    /* Open EP OUT */
+    /* 호스트에서 데이터를 받는 Bulk OUT 엔드포인트를 엽니다. */
     USBD_LL_OpenEP(pdev, CDC_OUT_EP, USBD_EP_TYPE_BULK,
                    CDC_DATA_FS_OUT_PACKET_SIZE);
 
     pdev->ep_out[CDC_OUT_EP & 0xFU].is_used = 1U;
   }
-  /* Open Command IN EP */
+  /* CDC ACM 제어 알림용 Interrupt IN 엔드포인트를 엽니다. */
   USBD_LL_OpenEP(pdev, CDC_CMD_EP, USBD_EP_TYPE_INTR, CDC_CMD_PACKET_SIZE);
   pdev->ep_in[CDC_CMD_EP & 0xFU].is_used = 1U;
 
@@ -516,22 +516,22 @@ static uint8_t  USBD_CDC_Init(USBD_HandleTypeDef *pdev, uint8_t cfgidx)
   {
     hcdc = (USBD_CDC_HandleTypeDef *) pdev->pClassData;
 
-    /* Init  physical Interface components */
+    /* 사용자가 등록한 CDC 인터페이스 초기화 콜백을 호출해 TX/RX 버퍼를 연결합니다. */
     ((USBD_CDC_ItfTypeDef *)pdev->pUserData)->Init();
 
-    /* Init Xfer states */
+    /* 송수신 상태 플래그를 idle 상태로 초기화합니다. TxState가 1이면 다음 송신은 BUSY가 됩니다. */
     hcdc->TxState = 0U;
     hcdc->RxState = 0U;
 
     if (pdev->dev_speed == USBD_SPEED_HIGH)
     {
-      /* Prepare Out endpoint to receive next packet */
+      /* 다음 OUT 패킷을 받을 수 있도록 RX 버퍼를 엔드포인트에 걸어 둡니다. */
       USBD_LL_PrepareReceive(pdev, CDC_OUT_EP, hcdc->RxBuffer,
                              CDC_DATA_HS_OUT_PACKET_SIZE);
     }
     else
     {
-      /* Prepare Out endpoint to receive next packet */
+      /* 다음 OUT 패킷을 받을 수 있도록 RX 버퍼를 엔드포인트에 걸어 둡니다. */
       USBD_LL_PrepareReceive(pdev, CDC_OUT_EP, hcdc->RxBuffer,
                              CDC_DATA_FS_OUT_PACKET_SIZE);
     }
@@ -588,9 +588,11 @@ static uint8_t  USBD_CDC_Setup(USBD_HandleTypeDef *pdev,
   uint16_t status_info = 0U;
   uint8_t ret = USBD_OK;
 
+  /* 요청 종류가 CDC 클래스 요청인지, USB 표준 요청인지 구분합니다. */
   switch (req->bmRequest & USB_REQ_TYPE_MASK)
   {
     case USB_REQ_TYPE_CLASS :
+      /* wLength가 있으면 EP0 데이터 단계가 포함된 요청입니다. */
       if (req->wLength)
       {
         if (req->bmRequest & 0x80U)
@@ -603,6 +605,7 @@ static uint8_t  USBD_CDC_Setup(USBD_HandleTypeDef *pdev,
         }
         else
         {
+          /* Host-to-device 제어 요청은 데이터 OUT 단계가 끝난 뒤 EP0_RxReady에서 실제 콜백을 호출합니다. */
           hcdc->CmdOpCode = req->bRequest;
           hcdc->CmdLength = (uint8_t)req->wLength;
 
@@ -683,7 +686,7 @@ static uint8_t  USBD_CDC_DataIn(USBD_HandleTypeDef *pdev, uint8_t epnum)
   {
     if ((pdev->ep_in[epnum].total_length > 0U) && ((pdev->ep_in[epnum].total_length % hpcd->IN_ep[epnum].maxpacket) == 0U))
     {
-      /* Update the packet total length */
+      /* ZLP 전송을 시작하기 전에 전체 길이 기록을 0으로 비워 다음 완료 콜백에서 송신 완료로 처리되게 합니다. */
       pdev->ep_in[epnum].total_length = 0U;
 
       /* Send ZLP */
@@ -712,13 +715,14 @@ static uint8_t  USBD_CDC_DataOut(USBD_HandleTypeDef *pdev, uint8_t epnum)
 {
   USBD_CDC_HandleTypeDef   *hcdc = (USBD_CDC_HandleTypeDef *) pdev->pClassData;
 
-  /* Get the received data length */
+  /* HAL PCD가 기록한 OUT 패킷 수신 길이를 읽어 CDC 핸들에 저장합니다. */
   hcdc->RxLength = USBD_LL_GetRxDataSize(pdev, epnum);
 
   /* USB data will be immediately processed, this allow next USB traffic being
   NAKed till the end of the application Xfer */
   if (pdev->pClassData != NULL)
   {
+    /* 애플리케이션 수신 콜백으로 버퍼와 길이를 넘깁니다. 콜백 안에서 다음 수신 준비를 다시 걸어야 합니다. */
     ((USBD_CDC_ItfTypeDef *)pdev->pUserData)->Receive(hcdc->RxBuffer, &hcdc->RxLength);
 
     return USBD_OK;
@@ -870,13 +874,13 @@ uint8_t  USBD_CDC_TransmitPacket(USBD_HandleTypeDef *pdev)
   {
     if (hcdc->TxState == 0U)
     {
-      /* Tx Transfer in progress */
+      /* IN 전송이 진행 중임을 표시합니다. 완료되면 DataIn 콜백에서 0으로 돌아갑니다. */
       hcdc->TxState = 1U;
 
-      /* Update the packet total length */
+      /* ZLP(Zero Length Packet) 필요 여부 판단을 위해 전체 전송 길이를 기록합니다. */
       pdev->ep_in[CDC_IN_EP & 0xFU].total_length = hcdc->TxLength;
 
-      /* Transmit next packet */
+      /* Low-Level 계층을 통해 실제 IN 엔드포인트 전송을 시작합니다. */
       USBD_LL_Transmit(pdev, CDC_IN_EP, hcdc->TxBuffer,
                        (uint16_t)hcdc->TxLength);
 
@@ -904,12 +908,12 @@ uint8_t  USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev)
 {
   USBD_CDC_HandleTypeDef   *hcdc = (USBD_CDC_HandleTypeDef *) pdev->pClassData;
 
-  /* Suspend or Resume USB Out process */
+  /* OUT 수신을 재개하기 위해 현재 속도에 맞는 패킷 크기로 엔드포인트 수신을 준비합니다. */
   if (pdev->pClassData != NULL)
   {
     if (pdev->dev_speed == USBD_SPEED_HIGH)
     {
-      /* Prepare Out endpoint to receive next packet */
+      /* 다음 OUT 패킷을 받을 수 있도록 RX 버퍼를 엔드포인트에 걸어 둡니다. */
       USBD_LL_PrepareReceive(pdev,
                              CDC_OUT_EP,
                              hcdc->RxBuffer,
@@ -917,7 +921,7 @@ uint8_t  USBD_CDC_ReceivePacket(USBD_HandleTypeDef *pdev)
     }
     else
     {
-      /* Prepare Out endpoint to receive next packet */
+      /* 다음 OUT 패킷을 받을 수 있도록 RX 버퍼를 엔드포인트에 걸어 둡니다. */
       USBD_LL_PrepareReceive(pdev,
                              CDC_OUT_EP,
                              hcdc->RxBuffer,

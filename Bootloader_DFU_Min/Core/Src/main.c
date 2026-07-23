@@ -258,9 +258,9 @@ void USB_LP_CAN1_RX0_IRQHandler(void)
 static void clock_init(void)
 {
   /* 플래시 prefetch와 wait state를 72 MHz 동작에 맞춘다. */
-  FLASH->ACR |= FLASH_ACR_PRFTBE;
+  FLASH->ACR |= FLASH_ACR_PRFTBE; // prefetch enable (다음 명령어를 미리 읽어두는 기능)
   FLASH->ACR &= ~FLASH_ACR_LATENCY;
-  FLASH->ACR |= FLASH_ACR_LATENCY_2;
+  FLASH->ACR |= FLASH_ACR_LATENCY_2;  // 2 wait state (72 MHz에서 플래시 읽기 지연을 맞추기 위해 필요)
 
   /* 외부 8 MHz HSE를 켠다. Blue Pill 계열 보드는 보통 8 MHz 크리스털을 쓴다. */
   RCC->CR |= RCC_CR_HSEON;
@@ -275,8 +275,8 @@ static void clock_init(void)
   RCC->CR |= RCC_CR_PLLON;
   while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {}
 
-  RCC->CFGR |= RCC_CFGR_SW_PLL;
-  while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {}
+  RCC->CFGR |= RCC_CFGR_SW_PLL; // PLL을 시스템 클럭으로 선택
+  while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {} // 실제 사용중인 클럭소스가 PLL인지 확인
 }
 
 static void systick_init(void)
@@ -293,11 +293,11 @@ static void usb_gpio_disconnect(void)
    * 많은 STM32F103 보드는 USB D+에 pull-up이 고정되어 있다.
    * PA12(D+)를 잠깐 output low로 만들어 PC가 물리적인 disconnect/reconnect를 본 것처럼 만든다.
    */
-  RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
-  GPIOA->CRH &= ~(GPIO_CRH_MODE12 | GPIO_CRH_CNF12);
-  GPIOA->CRH |= GPIO_CRH_MODE12_1;
-  GPIOA->BRR = GPIO_BRR_BR12;
-  for (volatile uint32_t i = 0; i < 720000U; i++) {}
+  RCC->APB2ENR |= RCC_APB2ENR_IOPAEN; // GPIOA clock enable
+  GPIOA->CRH &= ~(GPIO_CRH_MODE12 | GPIO_CRH_CNF12);  // 설정비트 초기화
+  GPIOA->CRH |= GPIO_CRH_MODE12_1;  // PA12 output 설정
+  GPIOA->BRR = GPIO_BRR_BR12; // PA12 Low 출력
+  for (volatile uint32_t i = 0; i < 720000U; i++) {}  // 72MHz기준, 약 10 ms
   GPIOA->CRH &= ~(GPIO_CRH_MODE12 | GPIO_CRH_CNF12);
   GPIOA->CRH |= GPIO_CRH_CNF12_0;
 }

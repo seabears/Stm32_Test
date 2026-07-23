@@ -109,7 +109,7 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
-  Module_Usb_Init();
+  ModuleUsb_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Base_Start_IT(&htim1);
 
@@ -156,7 +156,7 @@ static void Task_Run(void)
     {
         g_MainTick.flag_1000ms = 0;
         // 1000ms task
-        Module_Usb_Printf("hello cdc\r\n");
+        ModuleUsb_Printf("hello cdc\r\n");
         // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
     }
 }
