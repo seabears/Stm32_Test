@@ -7,6 +7,9 @@ extern "C" {
 
 #include "stm32f4xx_hal.h"
 
+#define LD2_Pin        GPIO_PIN_5
+#define LD2_GPIO_Port  GPIOA
+
 extern volatile uint32_t g_tim1_tick_ms;
 
 void Error_Handler(void);

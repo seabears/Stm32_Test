@@ -4,12 +4,14 @@ TIM_HandleTypeDef htim1;
 volatile uint32_t g_tim1_tick_ms;
 
 static void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 
 int main(void)
 {
   HAL_Init();
   SystemClock_Config();
+  MX_GPIO_Init();
   MX_TIM1_Init();
 
   if (HAL_TIM_Base_Start_IT(&htim1) != HAL_OK)
@@ -87,6 +89,21 @@ static void MX_TIM1_Init(void)
 
   HAL_NVIC_SetPriority(TIM1_UP_TIM10_IRQn, 1U, 0U);
   HAL_NVIC_EnableIRQ(TIM1_UP_TIM10_IRQn);
+}
+
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
+  GPIO_InitStruct.Pin = LD2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 }
 
 void Error_Handler(void)

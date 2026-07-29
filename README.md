@@ -6,8 +6,9 @@ NUCLEO-F401RE용 최소 STM32 HAL 프로젝트입니다.
 
 - HSI/PLL 기반 84 MHz 시스템 클록
 - TIM1 업데이트 인터럽트 기반 1 ms 틱 (`g_tim1_tick_ms`)
+- 온보드 LD2(PA5) GPIO 출력 초기화
 
-USB, PWM, 사용자 GPIO, 부트로더 코드는 포함하지 않습니다.
+USB, PWM, 추가 사용자 GPIO, 부트로더 코드는 포함하지 않습니다.
 
 ## 명령줄 빌드
 
