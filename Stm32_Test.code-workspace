@@ -1,0 +1,20 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "window.title": "STM32 Test — ${activeEditorShort}",
+    "workbench.colorCustomizations": {
+      "titleBar.activeBackground": "#244a75",
+      "titleBar.activeForeground": "#ffffff",
+      "titleBar.inactiveBackground": "#244a75",
+      "titleBar.inactiveForeground": "#cccccc",
+      "statusBar.background": "#244a75",
+      "statusBar.foreground": "#ffffff",
+      "activityBar.background": "#1c395a",
+      "activityBar.foreground": "#ffffff"
+    }
+  }
+}
