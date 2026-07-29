@@ -1,33 +1,37 @@
-# stm32f103c8t6
+# NUCLEO-F401RE
 
-STM32F103C8Tx firmware project moved from STM32CubeIDE workspace.
+NUCLEO-F401RE용 최소 STM32 HAL 프로젝트입니다.
 
-## Build from command line
+포함된 기능은 다음 두 가지뿐입니다.
 
-Run from this repository root:
+- HSI/PLL 기반 84 MHz 시스템 클록
+- TIM1 업데이트 인터럽트 기반 1 ms 틱 (`g_tim1_tick_ms`)
 
-```powershell
-make -j12 all
-```
+USB, PWM, 사용자 GPIO, 부트로더 코드는 포함하지 않습니다.
 
-The root `Makefile` builds with the GNU Arm toolchain bundled in STM32CubeIDE 1.15.0:
+## 명령줄 빌드
 
-```text
-C:\ST\STM32CubeIDE_1.15.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.12.3.rel1.win32_1.0.100.202403111256\tools\bin
-```
-
-Build artifacts are generated under `Debug/` and ignored by Git.
-
-Useful commands:
+저장소 루트에서 실행합니다.
 
 ```powershell
-make clean
-make -j12 all
-make flash
+.\build.cmd
 ```
 
-`make flash` uses ST-LINK through OpenOCD bundled with STM32CubeIDE. It does not use `stm32cubeidec`. The Makefile uses `interface/stlink-dap.cfg` to avoid the older HLA OpenOCD path.
+`build.cmd`는 `C:\ST` 아래에서 설치된 최신 STM32CubeIDE의 GNU Arm 툴체인과 Make를 찾아 사용합니다. Make를 PATH에 등록한 환경에서는 직접 실행할 수도 있습니다.
 
-## Build from STM32CubeIDE
+```powershell
+make TOOLCHAIN_BIN=C:/path/to/arm-toolchain/bin -j12 all
+```
 
-You can still import this folder as an existing STM32CubeIDE project. The CubeIDE metadata files (`.project`, `.cproject`, `.settings/`) are kept in the repository.
+산출물은 `Debug/` 아래에 생성됩니다.
+
+```powershell
+.\build.cmd clean
+.\build.cmd flash
+```
+
+`make flash`는 NUCLEO 보드의 온보드 ST-LINK와 OpenOCD의 `target/stm32f4x.cfg`를 사용합니다.
+
+## STM32CubeIDE
+
+이 폴더를 기존 STM32CubeIDE 프로젝트로 가져올 수 있습니다. 타깃 MCU는 STM32F401RETx이며 링커 스크립트는 `STM32F401RETX_FLASH.ld`입니다.
