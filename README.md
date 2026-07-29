@@ -32,6 +32,11 @@ make TOOLCHAIN_BIN=C:/path/to/arm-toolchain/bin -j12 all
 
 `make flash`는 NUCLEO 보드의 온보드 ST-LINK와 OpenOCD의 `target/stm32f4x.cfg`를 사용합니다.
 
+## VS Code
+
+- `Ctrl+Shift+B`: `STM32: Build`
+- `Terminal > Run Task > STM32: Flash`: 빌드 후 ST-LINK로 program/verify/reset
+
 ## STM32CubeIDE
 
 이 폴더를 기존 STM32CubeIDE 프로젝트로 가져올 수 있습니다. 타깃 MCU는 STM32F401RETx이며 링커 스크립트는 `STM32F401RETX_FLASH.ld`입니다.
