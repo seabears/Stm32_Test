@@ -23,6 +23,7 @@ LINKER_SCRIPT := STM32F401RETX_FLASH.ld
 
 C_SRCS := \
 Core/Src/main.c \
+Core/Src/card_animation.c \
 Core/Src/i2c_reg.c \
 Core/Src/ssd1306.c \
 Core/Src/stm32f4xx_hal_msp.c \

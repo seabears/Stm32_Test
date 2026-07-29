@@ -1,4 +1,5 @@
 #include "main.h"
+#include "card_animation.h"
 #include "ssd1306.h"
 
 #include <stdio.h>
@@ -6,6 +7,7 @@
 TIM_HandleTypeDef htim1;
 UART_HandleTypeDef huart2;
 volatile uint32_t g_tim1_tick_ms;
+static bool g_oled_ready;
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -31,13 +33,10 @@ int main(void)
 
   printf("NUCLEO-F401RE UART debug ready\r\n");
 
-  if (OLED_Init())
+  g_oled_ready = OLED_Init();
+  if (g_oled_ready)
   {
-    OLED_SetCursor(0U, 0U);
-    OLED_WriteString("STM32F401RE");
-    OLED_SetCursor(0U, 16U);
-    OLED_WriteString("I2C OLED READY");
-    (void)OLED_Update();
+    g_oled_ready = CardAnimation_Init();
     printf("SSD1306 OLED ready at address 0x%02X\r\n", OLED_I2C_ADDRESS);
   }
   else
@@ -75,6 +74,7 @@ AHB PRESC = /1
 
   /* GPIOB와 I2C1 클록 활성화 */
   RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+  RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
   RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
 
   /* 레지스터 쓰기 전에 I2C 비활성화 */
@@ -107,6 +107,37 @@ AHB PRESC = /1
                     (1U << (9U * 2U))); // 외부 pull up 사용시 off
 
   /*
+   * Recover a bus left in the middle of a byte by a debugger reset.
+   * Drive PB8/PB9 as open-drain GPIO, clock up to 9 bits, then generate STOP.
+   */
+  GPIOB->MODER &= ~((3U << (8U * 2U)) |
+                    (3U << (9U * 2U)));
+  GPIOB->MODER |=  ((1U << (8U * 2U)) |
+                    (1U << (9U * 2U)));
+  GPIOB->BSRR = GPIO_BSRR_BS8 | GPIO_BSRR_BS9;
+  HAL_Delay(1U);
+
+  for (uint32_t pulse = 0U; pulse < 9U; ++pulse)
+  {
+    GPIOB->BSRR = GPIO_BSRR_BR8;
+    HAL_Delay(1U);
+    GPIOB->BSRR = GPIO_BSRR_BS8;
+    HAL_Delay(1U);
+  }
+
+  GPIOB->BSRR = GPIO_BSRR_BR9;
+  HAL_Delay(1U);
+  GPIOB->BSRR = GPIO_BSRR_BS8;
+  HAL_Delay(1U);
+  GPIOB->BSRR = GPIO_BSRR_BS9;
+  HAL_Delay(1U);
+
+  GPIOB->MODER &= ~((3U << (8U * 2U)) |
+                    (3U << (9U * 2U)));
+  GPIOB->MODER |=  ((2U << (8U * 2U)) |
+                    (2U << (9U * 2U)));
+
+  /*
    * PB8, PB9 = AF4(I2C1)
    * PB8/9는 AFRH[7:0]에 해당
    */
@@ -114,6 +145,9 @@ AHB PRESC = /1
                      (0xFU << 4U));
   GPIOB->AFR[1] |=  ((4U << 0U) |
                      (4U << 4U));
+
+  RCC->APB1RSTR |= RCC_APB1RSTR_I2C1RST;
+  RCC->APB1RSTR &= ~RCC_APB1RSTR_I2C1RST;
 
   /*
    * APB1 peripheral clock = 42 MHz
@@ -141,11 +175,19 @@ AHB PRESC = /1
 
   /* I2C 활성화 */
   I2C1->CR1 |= I2C_CR1_PE;
+
+  HAL_NVIC_SetPriority(I2C1_EV_IRQn, 2U, 0U);
+  HAL_NVIC_EnableIRQ(I2C1_EV_IRQn);
+  HAL_NVIC_SetPriority(I2C1_ER_IRQn, 2U, 1U);
+  HAL_NVIC_EnableIRQ(I2C1_ER_IRQn);
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 2U, 0U);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
 }
 
 void Scheduler_Run(void)
 {
   static uint32_t last_tick = 0;
+  static uint32_t last_card_tick = 0;
   if (g_tim1_tick_ms != last_tick)
   {
     last_tick = g_tim1_tick_ms;
@@ -166,6 +208,11 @@ void Scheduler_Run(void)
 
   }
 
+  if (g_oled_ready && ((uint32_t)(last_tick - last_card_tick) >= 80U))
+  {
+    last_card_tick = last_tick;
+    g_oled_ready = CardAnimation_Update();
+  }
 
 }
 
