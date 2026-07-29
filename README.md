@@ -7,8 +7,19 @@ NUCLEO-F401RE용 최소 STM32 HAL 프로젝트입니다.
 - HSI/PLL 기반 84 MHz 시스템 클록
 - TIM1 업데이트 인터럽트 기반 1 ms 틱 (`g_tim1_tick_ms`)
 - 온보드 LD2(PA5) GPIO 출력 초기화
+- ST-LINK 가상 COM 포트용 USART2(PA2/PA3), 115200-8-N-1 및 `printf()` 출력
 
-USB, PWM, 추가 사용자 GPIO, 부트로더 코드는 포함하지 않습니다.
+USB Device, PWM, 추가 사용자 GPIO, 부트로더 코드는 포함하지 않습니다.
+
+## UART 디버깅
+
+보드의 ST-LINK USB를 PC에 연결한 뒤 생성된 COM 포트를 115200 baud, 8 data bits, no parity, 1 stop bit로 엽니다. 부팅하면 다음 메시지가 출력됩니다.
+
+```text
+NUCLEO-F401RE UART debug ready
+```
+
+애플리케이션에서는 일반 `printf()`를 사용할 수 있습니다.
 
 ## 명령줄 빌드
 

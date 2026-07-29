@@ -13,6 +13,7 @@ extern "C" {
 #define HAL_PWR_MODULE_ENABLED
 #define HAL_RCC_MODULE_ENABLED
 #define HAL_TIM_MODULE_ENABLED
+#define HAL_UART_MODULE_ENABLED
 
 #if !defined(HSE_VALUE)
 #define HSE_VALUE                 8000000U
@@ -44,6 +45,7 @@ extern "C" {
 #define DATA_CACHE_ENABLE         1U
 
 #define USE_HAL_TIM_REGISTER_CALLBACKS  0U
+#define USE_HAL_UART_REGISTER_CALLBACKS 0U
 
 #ifdef HAL_RCC_MODULE_ENABLED
 #include "stm32f4xx_hal_rcc.h"
@@ -71,6 +73,10 @@ extern "C" {
 
 #ifdef HAL_TIM_MODULE_ENABLED
 #include "stm32f4xx_hal_tim.h"
+#endif
+
+#ifdef HAL_UART_MODULE_ENABLED
+#include "stm32f4xx_hal_uart.h"
 #endif
 
 #ifdef USE_FULL_ASSERT

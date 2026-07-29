@@ -1,27 +1,172 @@
 #include "main.h"
+#include "ssd1306.h"
+
+#include <stdio.h>
 
 TIM_HandleTypeDef htim1;
+UART_HandleTypeDef huart2;
 volatile uint32_t g_tim1_tick_ms;
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_USART2_UART_Init(void);
+static void Scheduler_Run(void);
+static void I2C_Init(void);
 
 int main(void)
 {
   HAL_Init();
   SystemClock_Config();
   MX_GPIO_Init();
+  MX_USART2_UART_Init();
   MX_TIM1_Init();
+
+  I2C_Init();
 
   if (HAL_TIM_Base_Start_IT(&htim1) != HAL_OK)
   {
     Error_Handler();
   }
 
+  printf("NUCLEO-F401RE UART debug ready\r\n");
+
+  if (OLED_Init())
+  {
+    OLED_SetCursor(0U, 0U);
+    OLED_WriteString("STM32F401RE");
+    OLED_SetCursor(0U, 16U);
+    OLED_WriteString("I2C OLED READY");
+    (void)OLED_Update();
+    printf("SSD1306 OLED ready at address 0x%02X\r\n", OLED_I2C_ADDRESS);
+  }
+  else
+  {
+    printf("SSD1306 OLED init failed (address 0x%02X)\r\n",
+           OLED_I2C_ADDRESS);
+  }
+
   while (1)
   {
+    Scheduler_Run();
+
+
+
+
   }
+}
+
+void I2C_Init(void)
+{
+/*
+SYSCLK = 84 MHz
+    │
+AHB PRESC = /1
+    │
+    ├─ HCLK = 84 MHz ───────────── GPIOB
+    │
+    └─ APB1 PRESC = /2
+           │
+           ├─ APB1 peripheral = 42 MHz ── I2C1
+           │
+           └─ APB1 timer = 84 MHz
+
+           */
+
+  /* GPIOB와 I2C1 클록 활성화 */
+  RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+  RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+
+  /* 레지스터 쓰기 전에 I2C 비활성화 */
+  I2C1->CR1 &= ~I2C_CR1_PE;
+
+  /*
+   * PB8 = I2C1_SCL
+   * PB9 = I2C1_SDA
+   * Alternate Function mode
+   */
+  GPIOB->MODER &= ~((3U << (8U * 2U)) |
+                    (3U << (9U * 2U)));
+  GPIOB->MODER |=  ((2U << (8U * 2U)) |
+                    (2U << (9U * 2U)));
+
+  /* Open-drain */
+  GPIOB->OTYPER |= GPIO_OTYPER_OT8 |
+                   GPIO_OTYPER_OT9;
+
+  /* High speed */
+  GPIOB->OSPEEDR &= ~((3U << (8U * 2U)) |
+                      (3U << (9U * 2U)));
+  GPIOB->OSPEEDR |=  ((2U << (8U * 2U)) |
+                      (2U << (9U * 2U)));
+
+  /* 내부 Pull-up */
+  GPIOB->PUPDR &= ~((3U << (8U * 2U)) |
+                    (3U << (9U * 2U)));
+  GPIOB->PUPDR |=  ((1U << (8U * 2U)) |
+                    (1U << (9U * 2U))); // 외부 pull up 사용시 off
+
+  /*
+   * PB8, PB9 = AF4(I2C1)
+   * PB8/9는 AFRH[7:0]에 해당
+   */
+  GPIOB->AFR[1] &= ~((0xFU << 0U) |
+                     (0xFU << 4U));
+  GPIOB->AFR[1] |=  ((4U << 0U) |
+                     (4U << 4U));
+
+  /*
+   * APB1 peripheral clock = 42 MHz
+   * FREQ[5:0] 필드는 MHz 단위
+   */
+  I2C1->CR2 = 42U;
+
+  /*
+   * Fast mode 400 kHz
+   * DUTY=0이면: (low : high = 2 : 1)
+   * CCR = PCLK1 / (3 × I2C 속도)
+   *     = 42 MHz / (3 × 400 kHz)
+   *     = 35
+   */
+  I2C1->CCR = I2C_CCR_FS | 35U;
+
+  /*
+   * Fast mode 최대 상승시간 300 ns
+   * TRISE = 42 MHz × 300 ns + 1 ≈ 13
+   */
+  I2C1->TRISE = 13U;
+
+  /* OAR1 bit 14는 하드웨어 요구에 따라 1로 유지 */
+  I2C1->OAR1 = (1U << 14);
+
+  /* I2C 활성화 */
+  I2C1->CR1 |= I2C_CR1_PE;
+}
+
+void Scheduler_Run(void)
+{
+  static uint32_t last_tick = 0;
+  if (g_tim1_tick_ms != last_tick)
+  {
+    last_tick = g_tim1_tick_ms;
+    // Place your periodic tasks here, e.g., every 1 ms
+  }
+
+
+  if(last_tick % 10 == 0) // Every 10 ms
+  {
+
+  }
+  if(last_tick % 100 == 0) // Every 100 ms
+  {
+    GPIOA->ODR ^= GPIO_PIN_5;
+  }
+  if(last_tick % 1000 == 0) // Every 1000 ms (1 second)
+  {
+
+  }
+
+
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -29,6 +174,23 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim->Instance == TIM1)
   {
     g_tim1_tick_ms++;
+  }
+}
+
+static void MX_USART2_UART_Init(void)
+{
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200U;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
   }
 }
 
