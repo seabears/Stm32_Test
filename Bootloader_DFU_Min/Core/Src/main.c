@@ -94,7 +94,7 @@
 #define DFU_OP_ERASE              2U
 #define DFU_OP_WRITE              3U
 /* 호스트가 다음 GETSTATUS를 보내기 전에 기다릴 권장 시간(ms). */
-#define DFU_POLL_TIMEOUT_MS       250U
+#define DFU_POLL_TIMEOUT_MS       50U
 
 /* 앱 Reset_Handler로 점프하기 위한 함수 포인터 타입. */
 typedef void (*entry_fn_t)(void);
