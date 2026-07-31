@@ -11,14 +11,26 @@ $ErrorActionPreference = "Continue"
 Write-Host "Waiting for USB DFU device $Device ..."
 Write-Host "Press and release RESET on the board now."
 Write-Host "Uploading $Bin to $Address when DFU appears ..."
+Write-Host "Progress will be shown below. Erase and download can take about a minute."
 
 $args = @("-w", "-d", $Device, "-a", "$Alt", "-s", $Address, "-D", $Bin)
-$upload = & $DfuUtil @args 2>&1 | Out-String
-Write-Host $upload
+& $DfuUtil @args 2>&1 | Tee-Object -Variable uploadLines
+$exitCode = $LASTEXITCODE
+$upload = $uploadLines -join [Environment]::NewLine
+$success = $upload -match "File downloaded successfully"
+
+if ($success) {
+  Write-Host "USB DFU upload finished successfully."
+  exit 0
+}
 
 if ($upload -match "LIBUSB_ERROR_NOT_SUPPORTED") {
   Write-Error "DFU device was found, but the Windows driver is not WinUSB/libusb compatible. Install the driver with Zadig."
   exit 2
 }
 
-exit $LASTEXITCODE
+if ($exitCode -ne 0) {
+  Write-Error "USB DFU upload failed with exit code $exitCode."
+}
+
+exit $exitCode

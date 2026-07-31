@@ -88,6 +88,14 @@
 #define DFUSE_CMD_SET_ADDRESS     0x21U
 #define DFUSE_CMD_ERASE           0x41U
 
+/* EP0 제어 전송과 분리하여 메인 루프에서 실행할 플래시 작업 종류. */
+#define DFU_OP_NONE               0U
+#define DFU_OP_SET_ADDRESS        1U
+#define DFU_OP_ERASE              2U
+#define DFU_OP_WRITE              3U
+/* 호스트가 다음 GETSTATUS를 보내기 전에 기다릴 권장 시간(ms). */
+#define DFU_POLL_TIMEOUT_MS       50U
+
 /* 앱 Reset_Handler로 점프하기 위한 함수 포인터 타입. */
 typedef void (*entry_fn_t)(void);
 
@@ -122,8 +130,14 @@ static uint16_t g_ep0_received;
 /* DFU 상태 머신의 현재 상태와 오류 코드. */
 static uint8_t g_dfu_state = DFU_STATE_DFU_IDLE;
 static uint8_t g_dfu_status = DFU_STATUS_OK;
-/* erase/write 직후 dfu-util에 한 번 DNBUSY 상태를 보여주기 위한 플래그. */
-static uint8_t g_dfu_busy_once;
+/*
+ * USB 인터럽트에서는 플래시를 직접 건드리지 않고 작업 정보만 예약한다.
+ * 실제 erase/write는 메인 루프가 실행하여 EP0 응답 지연과 PIPE 오류를 막는다.
+ */
+static uint8_t g_pending_dfu_op;
+static uint8_t g_pending_dfu_ready;
+static uint16_t g_pending_dfu_len;
+static uint32_t g_pending_dfu_addr;
 /* DFU manifest/leave 이후 리셋을 예약하기 위한 플래그와 시각. */
 static uint8_t g_leave_requested;
 static uint32_t g_leave_at;
@@ -138,7 +152,7 @@ static const uint8_t dev_desc[] =
   18, USB_DESC_DEVICE, 0x00, 0x02, 0x00, 0x00, 0x00, EP0_SIZE,
   (uint8_t)USB_VID, (uint8_t)(USB_VID >> 8),
   (uint8_t)USB_PID, (uint8_t)(USB_PID >> 8),
-  0x00, 0x02, 1, 2, 3, 1
+  0x00, 0x02, 0, 0, 0, 1
 };
 
 /* USB configuration/interface/DFU functional descriptor를 한 번에 담는다. */
@@ -185,6 +199,7 @@ static uint16_t pma_get_u16(uint16_t offset);
 static void handle_standard(void);
 static void handle_dfu(void);
 static void dfu_process_dnload(const uint8_t *buf, uint16_t len);
+static void dfu_run_pending(void);
 static void flash_unlock(void);
 static void flash_lock(void);
 static uint8_t flash_erase_page(uint32_t addr);
@@ -218,6 +233,17 @@ int main(void)
    */
   while (1)
   {
+    /*
+     * GETSTATUS에서 DNBUSY를 먼저 응답한 뒤 예약된 플래시 작업을 실행한다.
+     * 이렇게 해야 제어 전송 도중 FLASH가 CPU를 멈추게 해도 호스트가 PIPE 오류를 내지 않는다.
+     */
+    if ((g_dfu_state == DFU_STATE_DNBUSY) &&
+        (g_pending_dfu_op != DFU_OP_NONE) &&
+        (g_pending_dfu_ready != 0U))
+    {
+      dfu_run_pending();
+    }
+
     /* 디버그 고정 모드가 아니고, DFU 활동이 없고, 1초가 지났고, 앱이 유효하면 실행한다. */
     if ((DEBUG_STAY_IN_DFU == 0U) && (g_activity_seen == 0U) && (g_ms > BOOT_TIMEOUT_MS) && app_valid())
     {
@@ -340,6 +366,9 @@ static void usb_reset(void)
   g_expect_out = 0U;
   g_tx_len = 0U;
   g_dfu_state = DFU_STATE_DFU_IDLE;
+  g_dfu_status = DFU_STATUS_OK;
+  g_pending_dfu_op = DFU_OP_NONE;
+  g_pending_dfu_ready = 0U;
 }
 
 static void usb_handle_ctr(void)
@@ -478,6 +507,8 @@ static void handle_dfu(void)
 {
   static uint8_t resp[6];
 
+  g_activity_seen = 1U;
+
   switch (g_setup.bRequest)
   {
     case DFU_DNLOAD:
@@ -485,7 +516,6 @@ static void handle_dfu(void)
        * dfu-util이 펌웨어를 내려보낼 때 사용하는 핵심 요청.
        * wLength가 0이면 다운로드 종료(manifest), 0보다 크면 OUT data stage가 이어진다.
        */
-      g_activity_seen = 1U;
       if (g_setup.wLength == 0U)
       {
         /* 0-length DNLOAD는 전송 종료 신호다. 이후 GETSTATUS에서 reset 상태로 넘어간다. */
@@ -510,25 +540,28 @@ static void handle_dfu(void)
     case DFU_GETSTATUS:
     {
       /*
-       * dfu-util은 DNLOAD 후 GETSTATUS를 반복 호출하며 장치가 busy인지 idle인지 확인한다.
-       * 플래시 erase/write 직후에는 한 번 DNBUSY를 보여주고 다음에는 DNLOAD_IDLE로 간다.
+       * DNLOAD 수신 직후에는 아직 플래시 작업을 실행하지 않는다.
+       * 먼저 DNBUSY와 poll timeout을 응답하고, 메인 루프가 작업을 끝낸 뒤 DNLOAD_IDLE을 반환한다.
        */
       uint8_t response_state = g_dfu_state;
 
       if (g_dfu_state == DFU_STATE_DNLOAD_SYNC)
       {
-        if (g_dfu_busy_once != 0U)
+        if (g_pending_dfu_op != DFU_OP_NONE)
         {
-          /* 긴 작업이 있었다는 뜻을 host에 알려주기 위한 1회성 busy 응답. */
           response_state = DFU_STATE_DNBUSY;
-          g_dfu_busy_once = 0U;
-          g_dfu_state = DFU_STATE_DNLOAD_IDLE;
+          g_dfu_state = DFU_STATE_DNBUSY;
+          g_pending_dfu_ready = 0U;
         }
         else
         {
           g_dfu_state = DFU_STATE_DNLOAD_IDLE;
           response_state = g_dfu_state;
         }
+      }
+      else if (g_dfu_state == DFU_STATE_DNBUSY)
+      {
+        response_state = DFU_STATE_DNBUSY;
       }
       else if (g_dfu_state == DFU_STATE_MANIFEST_SYNC)
       {
@@ -541,7 +574,7 @@ static void handle_dfu(void)
 
       /* DFU GETSTATUS 응답: status 1바이트, poll timeout 3바이트, state 1바이트, iString 1바이트. */
       resp[0] = g_dfu_status;
-      resp[1] = 1U; resp[2] = 0U; resp[3] = 0U;
+      resp[1] = DFU_POLL_TIMEOUT_MS; resp[2] = 0U; resp[3] = 0U;
       resp[4] = response_state;
       resp[5] = 0U;
       ep0_send(resp, 6U);
@@ -559,6 +592,8 @@ static void handle_dfu(void)
       /* 오류 상태를 지우거나 현재 다운로드를 중단하고 idle로 돌아간다. */
       g_dfu_status = DFU_STATUS_OK;
       g_dfu_state = DFU_STATE_DFU_IDLE;
+      g_pending_dfu_op = DFU_OP_NONE;
+      g_pending_dfu_ready = 0U;
       ep0_send_zlp();
       break;
 
@@ -578,6 +613,20 @@ static void usb_rx_out(void)
 {
   /* EP0 RX count register에서 이번 OUT packet 길이만 꺼낸다. */
   uint16_t len = pma_get_u16(6U) & 0x03FFU;
+
+  /*
+   * Control IN 전송의 마지막 단계는 host가 보내는 zero-length OUT packet이다.
+   * 이 packet까지 정상 수신한 뒤에만 예약된 플래시 작업의 실행을 허용한다.
+   */
+  if ((g_expect_out == 0U) && (len == 0U))
+  {
+    if ((g_dfu_state == DFU_STATE_DNBUSY) && (g_pending_dfu_op != DFU_OP_NONE))
+    {
+      g_pending_dfu_ready = 1U;
+    }
+    ep0_rx_valid();
+    return;
+  }
 
   /*
    * DFU_DNLOAD가 먼저 와서 OUT data stage를 기대하는 상태여야 한다.
@@ -631,9 +680,9 @@ static void dfu_process_dnload(const uint8_t *buf, uint16_t len)
       addr = rd32(&buf[1]);
       if (address_allowed(addr, 1U) != 0U)
       {
-        g_dfu_address = addr;
+        g_pending_dfu_addr = addr;
+        g_pending_dfu_op = DFU_OP_SET_ADDRESS;
         g_dfu_state = DFU_STATE_DNLOAD_SYNC;
-        g_dfu_busy_once = 1U;
       }
       else
       {
@@ -644,12 +693,13 @@ static void dfu_process_dnload(const uint8_t *buf, uint16_t len)
     }
     else if ((len >= 5U) && (buf[0] == DFUSE_CMD_ERASE))
     {
-      /* host가 지정한 주소가 속한 1 KiB 플래시 페이지를 지운다. */
+      /* 페이지 삭제 주소만 예약하고 실제 삭제는 GETSTATUS 응답 뒤 메인 루프에서 수행한다. */
       addr = rd32(&buf[1]);
-      if ((address_allowed(addr, FLASH_PAGE_SIZE) != 0U) && (flash_erase_page(addr) != 0U))
+      if (address_allowed(addr, FLASH_PAGE_SIZE) != 0U)
       {
+        g_pending_dfu_addr = addr;
+        g_pending_dfu_op = DFU_OP_ERASE;
         g_dfu_state = DFU_STATE_DNLOAD_SYNC;
-        g_dfu_busy_once = 1U;
       }
       else
       {
@@ -671,8 +721,15 @@ static void dfu_process_dnload(const uint8_t *buf, uint16_t len)
      * 주소 = SET_ADDRESS 기준 + (block number - 2) * transfer size.
      */
     addr = g_dfu_address + ((uint32_t)(g_setup.wValue - 2U) * DFU_XFER_SIZE);
-    if ((address_allowed(addr, len) != 0U) && (flash_write(addr, buf, len) != 0U))
+    if (address_allowed(addr, len) != 0U)
     {
+      /*
+       * buf는 다음 DNLOAD까지 유지되는 g_ep0_out을 가리킨다.
+       * 호스트는 GETSTATUS 완료 전 다음 block을 보내지 않으므로 예약 작업 동안 안전하다.
+       */
+      g_pending_dfu_addr = addr;
+      g_pending_dfu_len = len;
+      g_pending_dfu_op = DFU_OP_WRITE;
       g_dfu_state = DFU_STATE_DNLOAD_SYNC;
     }
     else
@@ -686,6 +743,42 @@ static void dfu_process_dnload(const uint8_t *buf, uint16_t len)
   {
     /* block number 1은 이 최소 구현에서 특별히 쓰지 않는다. */
     g_dfu_state = DFU_STATE_DNLOAD_SYNC;
+  }
+}
+
+static void dfu_run_pending(void)
+{
+  uint8_t op = g_pending_dfu_op;
+  uint8_t ok = 1U;
+
+  /*
+   * 작업 시작 전에 예약을 비운다. 실행 중 USB reset/abort가 발생하더라도
+   * 같은 페이지를 다시 실행하지 않도록 하기 위한 순서다.
+   */
+  g_pending_dfu_op = DFU_OP_NONE;
+  g_pending_dfu_ready = 0U;
+
+  if (op == DFU_OP_SET_ADDRESS)
+  {
+    g_dfu_address = g_pending_dfu_addr;
+  }
+  else if (op == DFU_OP_ERASE)
+  {
+    ok = flash_erase_page(g_pending_dfu_addr);
+  }
+  else if (op == DFU_OP_WRITE)
+  {
+    ok = flash_write(g_pending_dfu_addr, g_ep0_out, g_pending_dfu_len);
+  }
+
+  if (ok != 0U)
+  {
+    g_dfu_state = DFU_STATE_DNLOAD_IDLE;
+  }
+  else
+  {
+    g_dfu_status = DFU_STATUS_ERR_WRITE;
+    g_dfu_state = DFU_STATE_ERROR;
   }
 }
 
@@ -755,19 +848,21 @@ static void ep0_tx_status(uint16_t status)
    * STM32 USB EP register의 STAT_TX/STAT_RX 비트는 write-toggle 방식이다.
    * 원하는 상태와 현재 상태의 차이만 XOR로 토글해야 한다.
    */
-  uint16_t r = USB->EP0R & USB_EPTX_DTOGMASK;
-  if ((status & 0x0010U) != 0U) { r ^= 0x0010U; }
-  if ((status & 0x0020U) != 0U) { r ^= 0x0020U; }
-  USB->EP0R = r | USB_EP_CTR_RX | USB_EP_CTR_TX;
+  uint16_t epr = USB->EP0R;
+  uint16_t r = epr & USB_EPREG_MASK;
+  r |= USB_EP_CTR_RX | USB_EP_CTR_TX;
+  r |= (uint16_t)((epr & USB_EPTX_STAT) ^ status);
+  USB->EP0R = r;
 }
 
 static void ep0_rx_status(uint16_t status)
 {
   /* RX 상태도 TX와 같은 toggle 규칙을 따른다. */
-  uint16_t r = USB->EP0R & USB_EPRX_DTOGMASK;
-  if ((status & 0x1000U) != 0U) { r ^= 0x1000U; }
-  if ((status & 0x2000U) != 0U) { r ^= 0x2000U; }
-  USB->EP0R = r | USB_EP_CTR_RX | USB_EP_CTR_TX;
+  uint16_t epr = USB->EP0R;
+  uint16_t r = epr & USB_EPREG_MASK;
+  r |= USB_EP_CTR_RX | USB_EP_CTR_TX;
+  r |= (uint16_t)((epr & USB_EPRX_STAT) ^ status);
+  USB->EP0R = r;
 }
 
 static void pma_write(uint16_t pma_addr, const uint8_t *src, uint16_t len)
