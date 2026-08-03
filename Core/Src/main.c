@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "Module_Usb.h"
+#include "usb_device.h"
+#include "usbd_cdc_if.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,6 +65,7 @@ volatile MainTick_t g_MainTick;
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
+UART_HandleTypeDef huart1;
 
 
 /* USER CODE BEGIN PV */
@@ -74,12 +77,29 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 static void Task_Run(void);
+static void Esp32Bridge_Init(void);
+static void Esp32Bridge_Task(void);
+static uint16_t Esp32Bridge_RxAvailable(void);
+static uint8_t Esp32Bridge_RxPeek(uint16_t offset);
+static void Esp32Bridge_RxDrop(uint16_t count);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#define ESP32_BRIDGE_UART_RX_BUFFER_SIZE 2048U
+#define ESP32_BRIDGE_USB_PACKET_SIZE     64U
+#define ESP32_BRIDGE_DEFAULT_BAUD        115200U
+
+extern USBD_HandleTypeDef hUsbDeviceFS;
+
+static volatile uint16_t s_uart_rx_head;
+static volatile uint16_t s_uart_rx_tail;
+static uint8_t s_uart_rx_buffer[ESP32_BRIDGE_UART_RX_BUFFER_SIZE];
+static uint8_t s_uart_rx_byte;
+static uint8_t s_usb_tx_packet[ESP32_BRIDGE_USB_PACKET_SIZE];
 
 /* USER CODE END 0 */
 
@@ -109,8 +129,10 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM1_Init();
   MX_TIM3_Init();
+  MX_USART1_UART_Init();
   ModuleUsb_Init();
   /* USER CODE BEGIN 2 */
+  Esp32Bridge_Init();
   HAL_TIM_Base_Start_IT(&htim1);
 
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
@@ -132,6 +154,7 @@ int main(void)
     //   printf("hello cdc\r\n");
     //   HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
     // }
+    Esp32Bridge_Task();
     Task_Run();
   }  /* USER CODE END 3 */
 }
@@ -156,9 +179,137 @@ static void Task_Run(void)
     {
         g_MainTick.flag_1000ms = 0;
         // 1000ms task
-        ModuleUsb_Printf("hello cdc\r\n");
+        /* Keep the CDC stream binary-clean while esptool is flashing ESP32. */
         // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
     }
+}
+
+static void Esp32Bridge_Init(void)
+{
+  s_uart_rx_head = 0;
+  s_uart_rx_tail = 0;
+  (void)HAL_UART_Receive_IT(&huart1, &s_uart_rx_byte, 1);
+}
+
+static void Esp32Bridge_Task(void)
+{
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
+  uint16_t available;
+  uint16_t length;
+  uint16_t i;
+
+  if ((hcdc == NULL) || (hcdc->TxState != 0U))
+  {
+    return;
+  }
+
+  available = Esp32Bridge_RxAvailable();
+  if (available == 0U)
+  {
+    return;
+  }
+
+  length = available;
+  if (length > ESP32_BRIDGE_USB_PACKET_SIZE)
+  {
+    length = ESP32_BRIDGE_USB_PACKET_SIZE;
+  }
+
+  for (i = 0; i < length; i++)
+  {
+    s_usb_tx_packet[i] = Esp32Bridge_RxPeek(i);
+  }
+
+  if (CDC_Transmit_FS(s_usb_tx_packet, length) == USBD_OK)
+  {
+    Esp32Bridge_RxDrop(length);
+  }
+}
+
+void Esp32Bridge_CdcReceive(uint8_t *data, uint32_t length)
+{
+  if ((data == NULL) || (length == 0U))
+  {
+    return;
+  }
+
+  (void)HAL_UART_Transmit(&huart1, data, (uint16_t)length, HAL_MAX_DELAY);
+}
+
+void Esp32Bridge_SetLineCoding(uint8_t *line_coding)
+{
+  uint32_t baud_rate;
+
+  if (line_coding == NULL)
+  {
+    return;
+  }
+
+  baud_rate = ((uint32_t)line_coding[0]) |
+              ((uint32_t)line_coding[1] << 8) |
+              ((uint32_t)line_coding[2] << 16) |
+              ((uint32_t)line_coding[3] << 24);
+
+  if (baud_rate == 0U)
+  {
+    baud_rate = ESP32_BRIDGE_DEFAULT_BAUD;
+  }
+
+  huart1.Init.BaudRate = baud_rate;
+  (void)HAL_UART_DeInit(&huart1);
+  (void)HAL_UART_Init(&huart1);
+  (void)HAL_UART_Receive_IT(&huart1, &s_uart_rx_byte, 1);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  uint16_t next_head;
+
+  if (huart->Instance != USART1)
+  {
+    return;
+  }
+
+  next_head = (uint16_t)((s_uart_rx_head + 1U) % ESP32_BRIDGE_UART_RX_BUFFER_SIZE);
+  if (next_head != s_uart_rx_tail)
+  {
+    s_uart_rx_buffer[s_uart_rx_head] = s_uart_rx_byte;
+    s_uart_rx_head = next_head;
+  }
+
+  (void)HAL_UART_Receive_IT(&huart1, &s_uart_rx_byte, 1);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART1)
+  {
+    (void)HAL_UART_Receive_IT(&huart1, &s_uart_rx_byte, 1);
+  }
+}
+
+static uint16_t Esp32Bridge_RxAvailable(void)
+{
+  uint16_t head = s_uart_rx_head;
+  uint16_t tail = s_uart_rx_tail;
+
+  if (head >= tail)
+  {
+    return (uint16_t)(head - tail);
+  }
+
+  return (uint16_t)(ESP32_BRIDGE_UART_RX_BUFFER_SIZE - tail + head);
+}
+
+static uint8_t Esp32Bridge_RxPeek(uint16_t offset)
+{
+  uint16_t index = (uint16_t)((s_uart_rx_tail + offset) % ESP32_BRIDGE_UART_RX_BUFFER_SIZE);
+  return s_uart_rx_buffer[index];
+}
+
+static void Esp32Bridge_RxDrop(uint16_t count)
+{
+  s_uart_rx_tail = (uint16_t)((s_uart_rx_tail + count) % ESP32_BRIDGE_UART_RX_BUFFER_SIZE);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
@@ -318,6 +469,40 @@ static void MX_TIM3_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
+
+static void MX_USART1_UART_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  __HAL_RCC_USART1_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+
+  GPIO_InitStruct.Pin = GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = ESP32_BRIDGE_DEFAULT_BAUD;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(USART1_IRQn);
 }
 /**
   * @brief GPIO Initialization Function

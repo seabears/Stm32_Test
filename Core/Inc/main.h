@@ -53,6 +53,8 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
+void Esp32Bridge_CdcReceive(uint8_t *data, uint32_t length);
+void Esp32Bridge_SetLineCoding(uint8_t *line_coding);
 
 /* USER CODE END EFP */
 

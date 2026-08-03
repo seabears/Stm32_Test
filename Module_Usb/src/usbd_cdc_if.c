@@ -1,4 +1,5 @@
 #include "usbd_cdc_if.h"
+#include "main.h"
 #include "usb_device.h"
 
 static int8_t CDC_Init_FS(void);
@@ -40,7 +41,6 @@ static int8_t CDC_DeInit_FS(void)
 
 static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
 {
-  (void)pbuf;
   (void)length;
 
   /*
@@ -57,6 +57,8 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
     case CDC_GET_COMM_FEATURE:
     case CDC_CLEAR_COMM_FEATURE:
     case CDC_SET_LINE_CODING:
+      Esp32Bridge_SetLineCoding(pbuf);
+      break;
     case CDC_GET_LINE_CODING:
     case CDC_SET_CONTROL_LINE_STATE:
     case CDC_SEND_BREAK:
@@ -69,8 +71,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
 
 static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
 {
-  (void)Buf;
-  (void)Len;
+  Esp32Bridge_CdcReceive(Buf, *Len);
 
   /*
    * 호스트에서 OUT 데이터가 들어오면 호출됩니다.

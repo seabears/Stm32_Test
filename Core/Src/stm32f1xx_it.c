@@ -58,6 +58,7 @@
 
 /* USER CODE BEGIN EV */
 extern TIM_HandleTypeDef htim1;
+extern UART_HandleTypeDef huart1;
 extern PCD_HandleTypeDef hpcd_USB_FS;
 /* USER CODE END EV */
 
@@ -203,6 +204,11 @@ void SysTick_Handler(void)
 void TIM1_UP_IRQHandler(void)
 {
   HAL_TIM_IRQHandler(&htim1);
+}
+
+void USART1_IRQHandler(void)
+{
+  HAL_UART_IRQHandler(&huart1);
 }
 
 void USB_LP_CAN1_RX0_IRQHandler(void)
