@@ -1,4 +1,4 @@
-#include "freertos_app.h"
+#include "Module_FreeRtos.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -13,7 +13,7 @@ static void Task10ms(void *argument);
 static void Task100ms(void *argument);
 static void Task1000ms(void *argument);
 
-void FreeRTOSApp_Start(void)
+void ModuleFreeRtos_Start(void)
 {
   BaseType_t result;
 
@@ -52,6 +52,8 @@ void FreeRTOSApp_Start(void)
 static void Task1ms(void *argument)
 {
   TickType_t lastWakeTime = xTaskGetTickCount();
+  static unsigned int i = 0;
+
   (void)argument;
 
   for (;;)
@@ -59,25 +61,20 @@ static void Task1ms(void *argument)
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1U));
     /* Add 1 ms work here. */
 
-    static unsigned int i = 0;
-
-    
     if (i < 1U)
     {
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
     }
     else
     {
-        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
     }
 
     i++;
-
     if (i >= 10U)
     {
-        i = 0U;
+      i = 0U;
     }
-
   }
 }
 
@@ -101,7 +98,7 @@ static void Task100ms(void *argument)
   for (;;)
   {
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(100U));
-
+    /* Add 100 ms work here. */
   }
 }
 
@@ -113,7 +110,7 @@ static void Task1000ms(void *argument)
   for (;;)
   {
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000U));
-    // ModuleUsb_Printf("hello cdc\r\n");
+    /* ModuleUsb_Printf("hello cdc\r\n"); */
   }
 }
 

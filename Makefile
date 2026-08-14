@@ -28,7 +28,7 @@ LINKER_SCRIPT := STM32F103C8TX_FLASH_BOOTLOADER.ld
 
 C_SRCS := \
 Core/Src/main.c \
-Core/Src/freertos_app.c \
+Module_FreeRtos/src/Module_FreeRtos.c \
 Module_Usb/src/Module_Usb.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
@@ -87,6 +87,7 @@ CPU_FLAGS := -mcpu=cortex-m3 -mfloat-abi=soft -mthumb
 DEFINES := -DDEBUG -DUSE_HAL_DRIVER -DSTM32F103xB
 INCLUDES := \
 -ICore/Inc \
+-IModule_FreeRtos/inc \
 -IModule_Usb/inc \
 -IMiddlewares/Third_Party/FreeRTOS/Source/include \
 -IMiddlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM3 \

@@ -1,0 +1,12 @@
+
+RCC : Reset and Clock Control
+
+
+SystemCoreClock : 시스템 클락 저장 변수, 초기 설정(HSI 8Mhz)이후, RCC 설정 기반 값 갱신
+
+
+PLL : Phase-Locked Loop, 입력 클럭을 더 높은 주파수로 만들어줌 (8Mhz -> PLL x 9 -> 72MHz)
+
+AHB : Advanced High-performance Bus, 고속 데이터 통로 (CPU, 메모리, DMA 등 연결)
+
+

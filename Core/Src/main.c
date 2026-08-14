@@ -22,7 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "Module_Usb.h"
-#include "freertos_app.h"
+#include "Module_FreeRtos.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -90,7 +90,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 500);
 
-  FreeRTOSApp_Start();
+  ModuleFreeRtos_Start();
   /* USER CODE END 2 */
 
   /* Infinite loop */
