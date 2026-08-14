@@ -22,31 +22,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "Module_Usb.h"
+#include "freertos_app.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef signed char        int8;
-typedef short              int16;
-typedef int                int32;
-typedef long long          int64;
-typedef unsigned char      uint8;
-typedef unsigned short     uint16;
-typedef unsigned int       uint32;
-typedef unsigned long long uint64;
-
-typedef struct
-{
-    uint16_t count_10ms;
-    uint16_t count_100ms;
-    uint16_t count_1000ms;
-
-    volatile uint8_t flag_10ms;
-    volatile uint8_t flag_100ms;
-    volatile uint8_t flag_1000ms;
-} MainTick_t;
-
-volatile MainTick_t g_MainTick;
 
 /* USER CODE END PTD */
 
@@ -61,7 +41,6 @@ volatile MainTick_t g_MainTick;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 
 
@@ -72,10 +51,8 @@ TIM_HandleTypeDef htim3;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_TIM1_Init(void);
 static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
-static void Task_Run(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -107,14 +84,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_TIM1_Init();
   MX_TIM3_Init();
   ModuleUsb_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start_IT(&htim1);
-
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
   __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 500);
+
+  FreeRTOSApp_Start();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -124,69 +100,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // static uint32_t lastPrintTick = 0;
-
-    // if ((HAL_GetTick() - lastPrintTick) >= 1000U)
-    // {
-    //   lastPrintTick = HAL_GetTick();
-    //   printf("hello cdc\r\n");
-    //   HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
-    // }
-    Task_Run();
+    __WFI();
   }  /* USER CODE END 3 */
-}
-
-static void Task_Run(void)
-{
-    if (g_MainTick.flag_10ms)
-    {
-        g_MainTick.flag_10ms = 0;
-        // 10ms task
-    }
-
-    if (g_MainTick.flag_100ms)
-    {
-        g_MainTick.flag_100ms = 0;
-        // 100ms task
-        HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
-        
-    }
-
-    if (g_MainTick.flag_1000ms)
-    {
-        g_MainTick.flag_1000ms = 0;
-        // 1000ms task
-        ModuleUsb_Printf("hello cdc\r\n");
-        // HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2);
-    }
-}
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    if (htim->Instance == TIM1)
-    {
-        g_MainTick.count_10ms++;
-        g_MainTick.count_100ms++;
-        g_MainTick.count_1000ms++;
-
-        if (g_MainTick.count_10ms >= 10)
-        {
-            g_MainTick.count_10ms = 0;
-            g_MainTick.flag_10ms = 1;
-        }
-
-        if (g_MainTick.count_100ms >= 100)
-        {
-            g_MainTick.count_100ms = 0;
-            g_MainTick.flag_100ms = 1;
-        }
-
-        if (g_MainTick.count_1000ms >= 1000)
-        {
-            g_MainTick.count_1000ms = 0;
-            g_MainTick.flag_1000ms = 1;
-        }
-    }
 }
 
 /**
@@ -229,39 +144,6 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-}
-static void MX_TIM1_Init(void)
-{
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  __HAL_RCC_TIM1_CLK_ENABLE();
-
-  htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 71; // 72MHz / 72 = 1MHz
-  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 999;  // 1MHz / 1000 = 1kHz
-  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  HAL_NVIC_SetPriority(TIM1_UP_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(TIM1_UP_IRQn);
 }
 
 

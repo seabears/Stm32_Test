@@ -28,6 +28,7 @@ LINKER_SCRIPT := STM32F103C8TX_FLASH_BOOTLOADER.ld
 
 C_SRCS := \
 Core/Src/main.c \
+Core/Src/freertos_app.c \
 Module_Usb/src/Module_Usb.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
@@ -57,7 +58,15 @@ Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c \
 Module_Usb/src/usb_device.c \
 Module_Usb/src/usbd_cdc_if.c \
 Module_Usb/src/usbd_desc.c \
-Module_Usb/src/usbd_conf.c
+Module_Usb/src/usbd_conf.c \
+Middlewares/Third_Party/FreeRTOS/Source/tasks.c \
+Middlewares/Third_Party/FreeRTOS/Source/queue.c \
+Middlewares/Third_Party/FreeRTOS/Source/list.c \
+Middlewares/Third_Party/FreeRTOS/Source/timers.c \
+Middlewares/Third_Party/FreeRTOS/Source/event_groups.c \
+Middlewares/Third_Party/FreeRTOS/Source/stream_buffer.c \
+Middlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM3/port.c \
+Middlewares/Third_Party/FreeRTOS/Source/portable/MemMang/heap_4.c
 
 ASM_SRCS := \
 Core/Startup/startup_stm32f103c8tx.s
@@ -79,6 +88,8 @@ DEFINES := -DDEBUG -DUSE_HAL_DRIVER -DSTM32F103xB
 INCLUDES := \
 -ICore/Inc \
 -IModule_Usb/inc \
+-IMiddlewares/Third_Party/FreeRTOS/Source/include \
+-IMiddlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM3 \
 -IMiddlewares/ST/STM32_USB_Device_Library/Core/Inc \
 -IMiddlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc \
 -IDrivers/STM32F1xx_HAL_Driver/Inc/Legacy \
