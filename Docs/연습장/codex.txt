@@ -1,0 +1,342 @@
+ELF를 이용하면 Python GUI가 STM32 펌웨어의 전역변수 이름과 메모리 주소를 자동으로 찾을 수 있습니다.
+
+핵심은 ELF가 값을 가지고 있는 게 아니라 변수의 위치를 알려주는 지도라는 점입니다.
+
+```text
+ELF 파일
+motorPwm → 주소 0x20000120, 크기 2바이트
+
+Python
+MEM_READ,0x20000120,2 요청
+
+STM32
+실제 SRAM 값 읽어서 USB로 응답
+```
+
+## ELF 파일에 들어 있는 정보
+
+현재 프로젝트의 빌드 결과는 다음 파일입니다.
+
+```text
+E:\haewoong\GIT\Stm32_Test\Debug\stm32f103c8t6.elf
+```
+
+현재 Makefile에 `-g3` 옵션이 있기 때문에 ELF에는 심볼 테이블과 DWARF 디버그 정보가 포함됩니다.
+
+```makefile
+CFLAGS := ... -g3 ...
+```
+
+ELF에는 다음 정보가 들어갈 수 있습니다.
+
+- 전역변수 이름
+- 정적 변수 이름
+- 변수 메모리 주소
+- 변수 크기
+- 함수 이름과 주소
+- C 자료형
+- 구조체 멤버
+- 소스 파일과 줄 번호
+
+Python에서는 `pyelftools`로 ELF와 DWARF를 분석할 수 있습니다. [pyelftools 공식 저장소](https://github.com/eliben/pyelftools)
+
+## pyelftools 설치
+
+```powershell
+python -m pip install pyelftools pyserial
+```
+
+## ELF에서 전역변수 찾기
+
+다음 코드는 ELF의 `.symtab`에서 SRAM에 배치된 변수를 출력합니다.
+
+```python
+from pathlib import Path
+from elftools.elf.elffile import ELFFile
+
+ELF_PATH = Path(
+    r"E:\haewoong\GIT\Stm32_Test\Debug\stm32f103c8t6.elf"
+)
+
+SRAM_START = 0x20000000
+SRAM_END = 0x20005000  # STM32F103C8: 20KB SRAM 끝 주소
+
+with ELF_PATH.open("rb") as file:
+    elf = ELFFile(file)
+    symbol_table = elf.get_section_by_name(".symtab")
+
+    if symbol_table is None:
+        raise RuntimeError("ELF에 .symtab이 없습니다.")
+
+    variables = []
+
+    for symbol in symbol_table.iter_symbols():
+        if symbol["st_info"]["type"] != "STT_OBJECT":
+            continue
+
+        name = symbol.name
+        address = int(symbol["st_value"])
+        size = int(symbol["st_size"])
+
+        if not name or size == 0:
+            continue
+
+        if SRAM_START <= address < SRAM_END:
+            variables.append((address, size, name))
+
+    variables.sort()
+
+    for address, size, name in variables:
+        print(f"0x{address:08X}  {size:3d} bytes  {name}")
+```
+
+출력은 다음과 비슷합니다.
+
+```text
+0x20000000    4 bytes  uwTick
+0x20000004    4 bytes  SystemCoreClock
+0x20000020    2 bytes  motorPwm
+0x20000024    4 bytes  encoderCount
+0x20000028    4 bytes  targetSpeed
+```
+
+특정 변수 하나를 찾는 코드는 더 간단합니다.
+
+```python
+def find_symbol(elf_path: Path, variable_name: str):
+    with elf_path.open("rb") as file:
+        elf = ELFFile(file)
+        symbol_table = elf.get_section_by_name(".symtab")
+
+        symbols = symbol_table.get_symbol_by_name(variable_name)
+
+        if not symbols:
+            raise KeyError(f"변수를 찾을 수 없습니다: {variable_name}")
+
+        symbol = symbols[0]
+
+        return {
+            "name": symbol.name,
+            "address": int(symbol["st_value"]),
+            "size": int(symbol["st_size"]),
+        }
+
+
+variable = find_symbol(ELF_PATH, "motorPwm")
+
+print(variable)
+```
+
+결과:
+
+```python
+{
+    "name": "motorPwm",
+    "address": 0x20000020,
+    "size": 2
+}
+```
+
+## USB Watch 요청
+
+Python은 찾은 주소를 STM32에 전달합니다.
+
+```text
+WATCH_ADDR,0x20000020,2,10
+```
+
+각 필드의 의미는:
+
+```text
+0x20000020 : 변수 주소
+2          : 변수 크기
+10         : 전송 주기 10ms
+```
+
+STM32 응답:
+
+```text
+VALUE_ADDR,15230,0x20000020,2,F401
+```
+
+STM32F103은 little-endian이므로:
+
+```text
+F4 01 → 0x01F4 → 500
+```
+
+Python에서 변환하면:
+
+```python
+raw = bytes.fromhex("F401")
+
+value = int.from_bytes(
+    raw,
+    byteorder="little",
+    signed=False
+)
+
+print(value)  # 500
+```
+
+## 자료형 문제
+
+ELF 심볼 테이블의 주소와 크기만으로는 정확한 C 자료형을 구분할 수 없습니다.
+
+예를 들어 모두 4바이트입니다.
+
+```c
+uint32_t counter;
+int32_t speed;
+float voltage;
+```
+
+`.symtab`만 보면 셋 다:
+
+```text
+size = 4
+```
+
+로 보입니다. 따라서 정확한 타입을 알려면 ELF의 DWARF 정보를 분석해야 합니다.
+
+```text
+DW_TAG_variable
+ ├─ DW_AT_name     = motorPwm
+ ├─ DW_AT_location = 0x20000020
+ └─ DW_AT_type
+      └─ uint16_t
+```
+
+`pyelftools`는 ELF와 DWARF 모두 분석할 수 있습니다. 다만 `typedef`, 포인터, 배열, 구조체를 따라가야 하므로 주소 검색보다 구현이 복잡합니다.
+
+초기 구현은 다음 순서를 추천합니다.
+
+1. `.symtab`으로 이름·주소·크기 조회
+2. 기본 정수형 변수부터 지원
+3. DWARF 분석으로 signed/unsigned/float 구분
+4. 배열과 구조체 지원
+
+## 전체 동작 구조
+
+```text
+Python GUI가 ELF 로드
+        ↓
+.symtab/DWARF에서 변수 목록 생성
+        ↓
+사용자가 motorPwm 선택
+        ↓
+ELF에서 주소와 타입 확인
+motorPwm = uint16_t, 0x20000020
+        ↓
+WATCH_ADDR,0x20000020,2,10
+        ↓ USB CDC
+STM32가 주소 범위 검사
+        ↓
+10ms마다 SRAM 값 복사
+        ↓
+VALUE_ADDR 패킷 전송
+        ↓
+Python이 uint16_t로 해석
+        ↓
+GUI 값 및 그래프 갱신
+```
+
+## STM32 측 주소 검사
+
+Python이 보낸 주소를 바로 포인터로 사용하면 안 됩니다.
+
+```c
+/* 위험한 코드 */
+value = *(uint32_t *)requestedAddress;
+```
+
+반드시 허용된 메모리인지 검사해야 합니다.
+
+```c
+#define DEBUG_SRAM_START  0x20000000UL
+#define DEBUG_SRAM_END    0x20005000UL
+#define DEBUG_MAX_READ    64U
+
+static bool ModuleDebug_IsReadable(
+    uint32_t address,
+    uint32_t length)
+{
+    uint32_t endAddress;
+
+    if ((length == 0U) || (length > DEBUG_MAX_READ))
+    {
+        return false;
+    }
+
+    if (address > (UINT32_MAX - length))
+    {
+        return false;
+    }
+
+    endAddress = address + length;
+
+    return (address >= DEBUG_SRAM_START) &&
+           (endAddress <= DEBUG_SRAM_END);
+}
+```
+
+검사가 끝난 뒤 `memcpy()`로 읽습니다.
+
+```c
+uint8_t data[DEBUG_MAX_READ];
+
+if (ModuleDebug_IsReadable(address, length))
+{
+    memcpy(data, (const void *)address, length);
+}
+```
+
+`memcpy()`를 사용하면 정렬되지 않은 주소를 직접 `uint32_t *`로 역참조하는 문제도 줄일 수 있습니다.
+
+## 현재 펌웨어와 ELF 일치 확인
+
+Python이 사용하는 ELF와 STM32에 다운로드된 펌웨어가 다르면 같은 변수 이름이라도 주소가 달라질 수 있습니다.
+
+```text
+이전 ELF
+motorPwm = 0x20000020
+
+현재 펌웨어
+motorPwm = 0x20000038
+```
+
+이 상태에서 이전 ELF 주소를 읽으면 전혀 다른 변수를 표시합니다.
+
+따라서 펌웨어에 Build ID를 넣고 Python이 연결할 때 확인해야 합니다.
+
+```text
+PC → STM32
+FW_INFO
+
+STM32 → PC
+FW_INFO,20260814-213000,a1b2c3d4
+```
+
+Python이 로드한 ELF의 Build ID와 일치할 때만 Watch를 허용하는 방식이 안전합니다.
+
+## 읽기 쉬운 변수와 어려운 변수
+
+ELF 주소로 쉽게 읽을 수 있는 대상:
+
+- 전역변수
+- 파일 범위 `static` 변수
+- 고정 주소의 배열
+- 고정 주소의 구조체
+- Flash의 `const` 데이터
+
+단순하게 읽기 어려운 대상:
+
+- 함수 지역변수
+- CPU 레지스터에만 존재하는 변수
+- 최적화로 제거된 변수
+- 현재 FreeRTOS 태스크 스택에 존재하는 변수
+- 특정 실행 위치에서만 유효한 변수
+
+지역변수는 태스크의 스택 위치와 현재 실행 PC에 따라 주소가 달라질 수 있어서 단순 `MEM_READ` 방식으로는 어렵습니다. 첫 버전은 전역변수와 파일 `static` 변수만 대상으로 하는 것이 좋습니다.
+
+결론적으로 ELF 연동 방식을 사용하면 펌웨어에 Watch 변수 목록을 일일이 등록하지 않고도 Python이 전역변수 목록을 자동으로 만들 수 있습니다. STM32에는 안전한 `WATCH_ADDR`, `UNWATCH_ADDR`, `MEM_READ` 기능만 구현하면 됩니다.

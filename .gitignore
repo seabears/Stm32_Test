@@ -21,3 +21,8 @@ RemoteSystemsTempFiles/
 Thumbs.db
 .vscode/
 .idea/
+
+# Python GUI local environment/cache
+.venv/
+__pycache__/
+*.pyc
