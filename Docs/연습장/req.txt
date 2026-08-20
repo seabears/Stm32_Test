@@ -31,3 +31,57 @@ stm32에서 외부 공개할 변수 테이블에 등록 필요
 
 elf 파일 디버그 심볼
 
+ELF: D:\01_GIT\Stm32_Test\Debug\stm32f103c8t6.elf
+RAM symbols: 52
+SystemCoreClock                      0x20000000     4 bytes
+uwTickPrio                           0x20000004     4 bytes
+uwTickFreq                           0x20000008     1 bytes
+USBD_CDC_DeviceQualifierDesc         0x2000000C    10 bytes
+USBD_CDC                             0x20000018    56 bytes
+USBD_CDC_CfgHSDesc                   0x20000050    67 bytes
+USBD_CDC_CfgFSDesc                   0x20000094    67 bytes
+USBD_CDC_OtherSpeedCfgDesc           0x200000D8    67 bytes
+USBD_Interface_fops_FS               0x2000011C    16 bytes
+FS_Desc                              0x2000012C    28 bytes
+USBD_FS_DeviceDesc                   0x20000148    18 bytes
+USBD_LangIDDesc                      0x2000015C     4 bytes
+USBD_StringSerial                    0x20000160    26 bytes
+uxCriticalNesting                    0x2000017C     4 bytes
+htim3                                0x2000019C    72 bytes
+i.0                                  0x200001E4     4 bytes
+uwTick                               0x200001E8     4 bytes
+cfgidx.0                             0x200001EC     1 bytes
+hUsbDeviceFS                         0x200001F0   708 bytes
+UserRxBufferFS                       0x200004B4  2048 bytes
+UserTxBufferFS                       0x20000CB4  2048 bytes
+USBD_StrDesc                         0x200014B4   512 bytes
+hpcd_USB_FS                          0x200016B4   728 bytes
+mem.0                                0x2000198C   544 bytes
+pxCurrentTCB                         0x20001BAC     4 bytes
+pxReadyTasksLists                    0x20001BB0   100 bytes
+xDelayedTaskList1                    0x20001C14    20 bytes
+xDelayedTaskList2                    0x20001C28    20 bytes
+pxDelayedTaskList                    0x20001C3C     4 bytes
+pxOverflowDelayedTaskList            0x20001C40     4 bytes
+xPendingReadyList                    0x20001C44    20 bytes
+uxCurrentNumberOfTasks               0x20001C58     4 bytes
+xTickCount                           0x20001C5C     4 bytes
+uxTopReadyPriority                   0x20001C60     4 bytes
+xSchedulerRunning                    0x20001C64     4 bytes
+xPendedTicks                         0x20001C68     4 bytes
+xYieldPending                        0x20001C6C     4 bytes
+xNumOfOverflows                      0x20001C70     4 bytes
+uxTaskNumber                         0x20001C74     4 bytes
+xNextTaskUnblockTime                 0x20001C78     4 bytes
+xIdleTaskHandle                      0x20001C7C     4 bytes
+uxSchedulerSuspended                 0x20001C80     4 bytes
+ucMaxSysCallPriority                 0x20001C84     1 bytes
+ulMaxPRIGROUPValue                   0x20001C88     4 bytes
+ucHeap                               0x20001C8C  6144 bytes
+xStart                               0x2000348C     8 bytes
+pxEnd                                0x20003494     4 bytes
+xFreeBytesRemaining                  0x20003498     4 bytes
+xMinimumEverFreeBytesRemaining       0x2000349C     4 bytes
+xNumberOfSuccessfulAllocations       0x200034A0     4 bytes
+xNumberOfSuccessfulFrees             0x200034A4     4 bytes
+xBlockAllocatedBit                   0x200034A8     4 bytes
