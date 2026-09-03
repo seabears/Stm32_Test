@@ -30,6 +30,8 @@ C_SRCS := \
 Core/Src/main.c \
 Module_FreeRtos/src/Module_FreeRtos.c \
 Module_Usb/src/Module_Usb.c \
+Module_Debug/src/ModuleDebug_Req.c \
+Module_Debug/src/ModuleDebug_Test.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
 Core/Src/syscalls.c \
@@ -89,6 +91,8 @@ INCLUDES := \
 -ICore/Inc \
 -IModule_FreeRtos/inc \
 -IModule_Usb/inc \
+-IModule_Debug/inc \
+-IModule_Util/inc \
 -IMiddlewares/Third_Party/FreeRTOS/Source/include \
 -IMiddlewares/Third_Party/FreeRTOS/Source/portable/GCC/ARM_CM3 \
 -IMiddlewares/ST/STM32_USB_Device_Library/Core/Inc \

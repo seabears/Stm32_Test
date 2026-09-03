@@ -3,6 +3,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "Module_Debug.h"
 #include "Module_Usb.h"
 #include "main.h"
 
@@ -105,12 +106,27 @@ static void Task100ms(void *argument)
 static void Task1000ms(void *argument)
 {
   TickType_t lastWakeTime = xTaskGetTickCount();
+  static uint8 testPacketSent = 0U;
+  static uint8 testDelaySeconds = 0U;
   (void)argument;
 
   for (;;)
   {
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000U));
-    /* ModuleUsb_Printf("hello cdc\r\n"); */
+
+    if (testDelaySeconds < 10U)
+    {
+      testDelaySeconds++;
+    }
+
+    /* PC가 COM 포트를 열 시간을 준 뒤 테스트 패킷을 정확히 한 번 전송합니다. */
+    if ((testPacketSent == 0U) && (testDelaySeconds >= 10U))
+    {
+      if (ModuleDebug_SendTestResponse() == MODULE_DEBUG_TRANSMIT_OK)
+      {
+        testPacketSent = 1U;
+      }
+    }
   }
 }
 

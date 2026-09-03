@@ -21,8 +21,9 @@ typedef enum
     DEBUG_CMD_NONE = 0,
     DEBUG_CMD_PING,
     DEBUG_CMD_INFO,
-    DEBUG_CMD_READ = 'R',
-    DEBUG_CMD_WRITE = 'W'
+    DEBUG_CMD_READ,
+    DEBUG_CMD_WRITE,
+    DEBUG_CMD_MAX
 } DebugCommand_e;
 
 typedef enum
@@ -42,7 +43,6 @@ typedef struct
     uint32 address;     /* 명령 대상 주소 */
     uint32 length;      /* 대상의 길이 (byte) */
     DebugCommandStatus_e status;        /* 명령 처리 성공 여부 */
-    uint8 data[DEBUG_DATA_SIZE];        /* 명령 처리 결과 데이터 */
 } DebugRequest_t;
 
 /* DebugRequest 저장 큐 타입 */
@@ -53,13 +53,26 @@ typedef struct
     uint16 rear;
 } DebugRequestQueue_t;
 
+/* Stm32 -> GUI 응답 패킷 */
+typedef struct
+{
+/* [8 : 명령 종류] [3 : 명령 상태] [x : Sequence] [4 : 길이(몇B) 0~8] [64 : 데이터] */
+    uint8 command :8;
+    uint8 status :3;
+    uint16 sequence :11;
+    uint8 length :4;
+
+
+    /* 실제 응답 데이터 64비트 = 8바이트 */
+    uint8 data[DEBUG_RESPONSE_DATA_SIZE];
+} DebugResponsePacket_t;
 
 DebugRequestQueue_t debug_RequestQueue; /* DebugRequest 저장 큐 */
 DebugRequest_t debug_CurrRequest; /* 현재 처리중인 DebugRequest */
 
 
 /* [2 : 명령 종류] [3 : 명령 상태] [x : Sequence] [3 : 길이(몇B) 0~8] [64 : 데이터] */
-static uint8 debug_TxBuffer[128]; /* (stm32 -> GUI) 응답 문자열 */
+static DebugResponsePacket_t debug_TxBuffer; /* (stm32 -> GUI) 응답 문자열 */
 
 typedef enum
 {
@@ -125,13 +138,17 @@ void ModuleDebug_ReceiveFromISR(const uint8 *data)
 
     /* 받은 것들 파싱해서 큐에 삽입 */
     /* data[0] : R/W */
-    if(data[0] == 'R')
+    if(data[0] == DEBUG_CMD_READ)
     {
         newRequest.command = DEBUG_CMD_READ;    /* Read Command */
     }
-    else
+    else if(data[0] == DEBUG_CMD_WRITE)
     {
         newRequest.command = DEBUG_CMD_WRITE;   /* Write Command */
+    }
+    else
+    {
+        (void)0;
     }
 
     /* data[1-8] : 32-bit 주소 */
@@ -177,17 +194,17 @@ void ModuleDebug_Task(void *argument)
         /* 현재 큐에 있는 요청을 가능한 만큼 모두 처리 */
         while (ModuleDebug_RequestQueue_Pop() == DEBUG_QUEUE_RETURN_OK)
         {
-            DebugRequest_t l_currRequest = debug_CurrRequest;
-            DebugCommand_e l_command = l_currRequest.command;
+            DebugRequest_t l_CurrRequest = debug_CurrRequest;
+            DebugCommand_e l_command = l_CurrRequest.command;
 
             switch (l_command)
             {
                 case DEBUG_CMD_READ:
-                    ModuleDebug_ReadProcess(currRequest);
+                    ModuleDebug_ReadProcess(l_CurrRequest);
                     break;
 
                 case DEBUG_CMD_WRITE:
-                    ModuleDebug_WriteProcess(currRequest);
+                    ModuleDebug_WriteProcess(l_CurrRequest);
                     break;
 
                 default:
@@ -202,12 +219,29 @@ void ModuleDebug_Task(void *argument)
 void ModuleDebug_ReadProcess(DebugRequest_t p_request)
 {
     uint32 l_address = p_request.address;
+    DebugCommand_e l_Cmd = p_request.command;
     uint32 l_length = p_request.length;
     uint32 l_sequence = p_request.sequence;
     bool l_isValidAddress = ModuleDebug_IsValidAddress(l_address, l_length);
     bool l_isValidRequest = false;
 
+
     DebugCommandStatus_e l_CmdStatus = DEBUG_CMD_STATUS_NONE;
+
+
+    /* 지원하는 명령인지 확인 */
+    switch (l_Cmd)
+    {
+        case DEBUG_CMD_READ:
+        case DEBUG_CMD_WRITE:
+        case DEBUG_CMD_PING:
+        case DEBUG_CMD_INFO:
+            break;
+        default:
+            l_CmdStatus = DEBUG_CMD_STATUS_INVALID_COMMAND;
+            break;
+    }
+
 
     /* 요청된 주소와 길이가 유효한지 확인 */
     if (l_isValidAddress)
@@ -220,6 +254,14 @@ void ModuleDebug_ReadProcess(DebugRequest_t p_request)
         l_isValidRequest = false;
         l_CmdStatus = DEBUG_CMD_STATUS_INVALID_ADDRESS;
     }
+
+    /* 패킷에 데이터 저장 가능한 길이 확인 */
+    if (l_length > DEBUG_RESPONSE_DATA_SIZE)
+    {
+        l_isValidRequest = false;
+        l_CmdStatus = DEBUG_CMD_STATUS_INVALID_LENGTH;
+    }
+
 
 
     /* GUI로 응답 전송 */
@@ -247,44 +289,41 @@ static bool ModuleDebug_IsValidAddress(uint32 address, uint32 length)
 
 static void ModuleDebug_SendResponse(DebugCommandStatus_e p_CmdStatus, DebugRequest_t p_request)
 {
-    uint32 l_sequence = p_request.sequence;
-    DebugCommand_e l_command = p_request.command;
-    uint32 l_address = p_request.address;
-    uint32 l_length = p_request.length;
-    uint8* l_data = p_request.data;
+    uint32 l_Sequence = p_request.sequence;
+    DebugCommand_e l_Cmd = p_request.command;
+    uint32 l_Address = p_request.address;
+    uint32 l_Length = p_request.length;
+    const uint8 *l_Data = (const uint8 *)l_Address;
 
-    /* [2 : 명령 종류] [3 : 명령 상태] [x : Sequence] [3 : 길이(몇B) 0~8] [64 : 데이터] */
+    /* [8 : 명령 종류] [3 : 명령 상태] [x : Sequence] [3 : 길이(몇B) 0~8] [64 : 데이터] */
+    debug_TxBuffer = (DebugResponsePacket_t){0};
 
-    if (DEBUG_COMMAND_STATUS_OK == p_CmdStatus)
+
+    /* 공통 헤더 생성 */
+    debug_TxBuffer.command = l_Cmd;
+    debug_TxBuffer.status = p_CmdStatus;
+    debug_TxBuffer.sequence = l_Sequence;
+    debug_TxBuffer.length = l_Length;
+
+
+    /* 명령 처리 성공 시에만 데이터 전송 */
+    if (DEBUG_CMD_STATUS_OK == p_CmdStatus)
     {
-        debug_TxBuffer[0] = (uint8)l_command; /* 명령 종류 */
-
-
-
-
-    }
-
-
-    /* 응답 문자열 생성 */
-    if (p_isValidRequest)
-    {
-        /* 유효한 요청에 대한 응답 */
-        /* 예: "R 2 0 0 0 0 1 E 8   4 \r \n" */
-        
-
-
-    }
-
-            /* 유효하다면 해당 메모리 영역을 읽어서 debug_TxBuffer에 저장 */
-        for(uint16 l_idx = 0; l_idx < l_length; l_idx++)
+        for (uint32 i = 0; i < l_Length; i++)
         {
-            debug_TxBuffer[l_idx] = *((uint8 *)(l_address + l_idx));
+            debug_TxBuffer.data[i] = l_Data[i]; /* 데이터 */
         }
+    }
 
+    /* 최종 패킷 USB CDC로 전송 */
+    ModuleDebug_Transmit((const uint8 *)&debug_TxBuffer, (uint16)sizeof(debug_TxBuffer));
 }
 
 
-
+void ModuleDebug_WriteProcess(DebugRequest_t p_request)
+{
+    
+}
 
 void ModuleDebug_Init()
 {
