@@ -1,6 +1,10 @@
 
 #include "Module_Debug.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
+
 /* 읽을 수 있는 주소 제한 : SRAM, Flash */
 #define SRAM_START      0x20000000U
 #define SRAM_END        0x20005000U
@@ -8,120 +12,38 @@
 #define APP_FLASH_START 0x08002000U
 #define APP_FLASH_END   0x08010000U
 
-
-/* 디버그용 버퍼 크기 */
-#define DEBUG_RX_BUFFER_SIZE 256U
-
-/* 응답 변수 값 크기 */
-#define DEBUG_DATA_SIZE 64U
-
-/* 디버그 명령 종류 */
-typedef enum
-{
-    DEBUG_CMD_NONE = 0,
-    DEBUG_CMD_PING,
-    DEBUG_CMD_INFO,
-    DEBUG_CMD_READ,
-    DEBUG_CMD_WRITE,
-    DEBUG_CMD_MAX
-} DebugCommand_e;
-
-typedef enum
-{
-    DEBUG_CMD_STATUS_NONE = 0,
-    DEBUG_CMD_STATUS_OK,
-    DEBUG_CMD_STATUS_INVALID_ADDRESS,
-    DEBUG_CMD_STATUS_INVALID_LENGTH,
-    DEBUG_CMD_STATUS_INVALID_COMMAND
-} DebugCommandStatus_e;
-
-/* 파싱된 디버그 요청 정보 */
-typedef struct
-{
-    uint32 sequence;    /* 명령 시퀀스 번호 */
-    DebugCommand_e command; /* 디버그 명령 종류 */
-    uint32 address;     /* 명령 대상 주소 */
-    uint32 length;      /* 대상의 길이 (byte) */
-    DebugCommandStatus_e status;        /* 명령 처리 성공 여부 */
-} DebugRequest_t;
-
-/* DebugRequest 저장 큐 타입 */
-typedef struct
-{
-    DebugRequest_t requests[DEBUG_RX_BUFFER_SIZE];
-    uint16 front;
-    uint16 rear;
-} DebugRequestQueue_t;
-
-/* Stm32 -> GUI 응답 패킷 */
-typedef struct
-{
-/* [8 : 명령 종류] [3 : 명령 상태] [x : Sequence] [4 : 길이(몇B) 0~8] [64 : 데이터] */
-    uint8 command :8;
-    uint8 status :3;
-    uint16 sequence :11;
-    uint8 length :4;
+#define DEBUG_REQUEST_PACKET_SIZE       10U
+#define DEBUG_MULTI_ITEM_SIZE            5U
+#define DEBUG_MULTI_REQUEST_HEADER_SIZE  2U
+#define DEBUG_MULTI_REQUEST_MAX_SIZE     (DEBUG_MULTI_REQUEST_HEADER_SIZE + \
+                                          (DEBUG_MULTI_MAX_ITEMS * DEBUG_MULTI_ITEM_SIZE))
+#define DEBUG_MULTI_RESPONSE_HEADER_SIZE 6U
+#define DEBUG_MULTI_RESPONSE_MAX_SIZE    64U
+#define DEBUG_SEQUENCE_MAX               0x7FFU
 
 
-    /* 실제 응답 데이터 64비트 = 8바이트 */
-    uint8 data[DEBUG_RESPONSE_DATA_SIZE];
-} DebugResponsePacket_t;
 
-DebugRequestQueue_t debug_RequestQueue; /* DebugRequest 저장 큐 */
+
 DebugRequest_t debug_CurrRequest; /* 현재 처리중인 DebugRequest */
 
 
 /* [2 : 명령 종류] [3 : 명령 상태] [x : Sequence] [3 : 길이(몇B) 0~8] [64 : 데이터] */
 static DebugResponsePacket_t debug_TxBuffer; /* (stm32 -> GUI) 응답 문자열 */
+static uint8 debug_MultiTxBuffer[DEBUG_MULTI_RESPONSE_MAX_SIZE];
+static TaskHandle_t debug_TaskHandle;
+static uint8 debug_RxPacket[DEBUG_MULTI_REQUEST_MAX_SIZE];
+static uint32 debug_RxPacketLength;
 
-typedef enum
-{
-    DEBUG_QUEUE_RETURN_OK = 0,
-    DEBUG_QUEUE_RETURN_FULL,
-    DEBUG_QUEUE_RETURN_EMPTY
-} DebugQueueReturn_e;
-
-/* RequestQueue 관련 */
-DebugQueueReturn_e ModuleDebug_RequestQueue_Push(DebugRequestQueue_t *queue, DebugRequest_t request)
-{
-    DebugQueueReturn_e returnType = DEBUG_QUEUE_RETURN_OK;
-    uint16 nextRear = (queue->rear + 1U) % DEBUG_RX_BUFFER_SIZE;
-
-    /* Queue가 꽉 차지 않았다면 새로운 데이터 삽입 */
-    if (nextRear != queue->front)
-    {
-        queue->requests[queue->rear] = request;
-        queue->rear = nextRear;
-    }
-    else
-    {
-        returnType = DEBUG_QUEUE_RETURN_FULL;
-    }
-
-    return returnType;
-}
+static bool ModuleDebug_IsValidAddress(uint32 p_address, uint32 p_length);
+static void ModuleDebug_SendResponse(DebugCommandStatus_e p_status, DebugRequest_t p_request);
+static void ModuleDebug_ReadProcess(DebugRequest_t p_request);
+static void ModuleDebug_MultiReadProcess(DebugRequest_t p_request);
+static void ModuleDebug_WriteProcess(DebugRequest_t p_request);
+static void ModuleDebug_ParseRequestFromISR(const uint8 *data);
+static uint32 ModuleDebug_GetRequestSize(const uint8 *data, uint32 length);
 
 
-DebugQueueReturn_e ModuleDebug_RequestQueue_Pop()
-{
-    DebugRequest_t request = {0};
-    DebugQueueReturn_e returnType = DEBUG_QUEUE_RETURN_OK;
 
-    /* Queue가 비어있지 않다면 */
-    if (debug_RequestQueue.front != debug_RequestQueue.rear)
-    {
-        request = debug_RequestQueue.requests[debug_RequestQueue.front];
-        debug_RequestQueue.front = (debug_RequestQueue.front + 1u) % DEBUG_RX_BUFFER_SIZE;
-
-        debug_CurrRequest = request; /* 현재 처리중인 Request 갱신 */
-    }
-    else
-    {
-        returnType = DEBUG_QUEUE_RETURN_EMPTY;
-    }
-
-    return returnType;
-}
 
 
 
@@ -129,16 +51,104 @@ DebugQueueReturn_e ModuleDebug_RequestQueue_Pop()
 // R 2 0 0 0 0 1 E 8   4 \r \n
 
 
-/* USB CDC로부터 받은 문자열 ISR */
-void ModuleDebug_ReceiveFromISR(const uint8 *data)
+/* USB CDC 수신 조각을 단일/다중 READ 요청 패킷으로 조립합니다. */
+void ModuleDebug_ReceiveFromISR(const uint8 *data, uint32 length)
 {
-    static uint32 sequence = 0;
+    uint32 dataIdx;
+
+    if (data == 0)
+    {
+        return;
+    }
+
+    for (dataIdx = 0U; dataIdx < length; dataIdx++)
+    {
+        uint32 expectedSize;
+
+        if (debug_RxPacketLength >= (uint32)sizeof(debug_RxPacket))
+        {
+            debug_RxPacketLength = 0U;
+        }
+
+        debug_RxPacket[debug_RxPacketLength] = data[dataIdx];
+        debug_RxPacketLength++;
+
+        expectedSize = ModuleDebug_GetRequestSize(debug_RxPacket,
+                                                  debug_RxPacketLength);
+        if ((expectedSize > 0U) && (debug_RxPacketLength >= expectedSize))
+        {
+            ModuleDebug_ParseRequestFromISR(debug_RxPacket);
+            debug_RxPacketLength = 0U;
+        }
+    }
+}
+
+static uint32 ModuleDebug_GetRequestSize(const uint8 *data, uint32 length)
+{
+    uint32 expectedSize = 0U;
+
+    if (length == 0U)
+    {
+        return 0U;
+    }
+
+    if (data[0] == DEBUG_CMD_READ_MULTI)
+    {
+        if (length >= DEBUG_MULTI_REQUEST_HEADER_SIZE)
+        {
+            uint32 itemCount = data[1];
+            if ((itemCount == 0U) || (itemCount > DEBUG_MULTI_MAX_ITEMS))
+            {
+                return DEBUG_MULTI_REQUEST_HEADER_SIZE;
+            }
+            expectedSize = DEBUG_MULTI_REQUEST_HEADER_SIZE
+                         + (itemCount * DEBUG_MULTI_ITEM_SIZE);
+        }
+    }
+    else
+    {
+        expectedSize = DEBUG_REQUEST_PACKET_SIZE;
+    }
+
+    return expectedSize;
+}
+
+static void ModuleDebug_ParseRequestFromISR(const uint8 *data)
+{
+    static uint32 sequence = 0U;
+    BaseType_t higherPriorityTaskWoken = pdFALSE;
+    uint8 parsedLength;
+    uint32 dataIdx;
 
     DebugRequest_t newRequest = {0};
 
+    if (data[0] == DEBUG_CMD_READ_MULTI)
+    {
+        uint32 itemIdx;
+
+        newRequest.command = DEBUG_CMD_READ_MULTI;
+        newRequest.itemCount = data[1];
+        if ((newRequest.itemCount == 0U)
+            || (newRequest.itemCount > DEBUG_MULTI_MAX_ITEMS))
+        {
+            return;
+        }
+
+        for (itemIdx = 0U; itemIdx < newRequest.itemCount; itemIdx++)
+        {
+            uint32 offset = DEBUG_MULTI_REQUEST_HEADER_SIZE
+                          + (itemIdx * DEBUG_MULTI_ITEM_SIZE);
+            newRequest.items[itemIdx].address = ((uint32)data[offset])
+                                               | ((uint32)data[offset + 1U] << 8U)
+                                               | ((uint32)data[offset + 2U] << 16U)
+                                               | ((uint32)data[offset + 3U] << 24U);
+            newRequest.items[itemIdx].length = data[offset + 4U];
+            newRequest.length += newRequest.items[itemIdx].length;
+        }
+    }
     /* 받은 것들 파싱해서 큐에 삽입 */
     /* data[0] : R/W */
-    if(data[0] == DEBUG_CMD_READ)
+    else if(data[0] == DEBUG_CMD_READ)
     {
         newRequest.command = DEBUG_CMD_READ;    /* Read Command */
     }
@@ -148,36 +158,62 @@ void ModuleDebug_ReceiveFromISR(const uint8 *data)
     }
     else
     {
-        (void)0;
+        return;
     }
 
-    /* data[1-8] : 32-bit 주소 */
-    for(int dataIdx = 1; dataIdx < 9; dataIdx++)
+    if (newRequest.command != DEBUG_CMD_READ_MULTI)
     {
-        uint8 address_4bit_part = hexChar_to_num(data[dataIdx]);
+        /* data[1-8] : 32-bit 주소 */
+        for (dataIdx = 1U; dataIdx < 9U; dataIdx++)
+        {
+            uint8 address_4bit_part = hexChar_to_num(data[dataIdx]);
 
-        /* Invalid character */
-        if(address_4bit_part == 255)
+            /* Invalid character */
+            if(address_4bit_part == 255)
+            {
+                return;
+            }
+
+            newRequest.address = ((newRequest.address << 4u)
+                                  | (uint32)address_4bit_part);
+        }
+
+        /* data[9] : Data length (unit : byte) */
+        parsedLength = hexChar_to_num(data[9]);
+        if (parsedLength == 255U)
         {
             return;
         }
-
-        newRequest.address = ((newRequest.address << 4u) | (uint32)address_4bit_part);
+        newRequest.length = parsedLength;
     }
-
-    /* data[9] : Data length (unit : byte) */
-    newRequest.length = hexChar_to_num(data[9]);
 
     /* Sequence 처리 */
-    if(sequence++ >= 65535u)
-    {
-        sequence = 0u;
-    }
     newRequest.sequence = sequence;
+    sequence++;
+    if (sequence > DEBUG_SEQUENCE_MAX)
+    {
+        sequence = 0U;
+    }
 
 
-    /* RequesetQueue에 삽입 */
-    ModuleDebug_RequestQueue_Push(&debug_RequestQueue, newRequest);
+    /* RequestQueue에 삽입하고 처리 태스크를 깨웁니다. */
+    if (ModuleDebug_Queue_Push(newRequest) == DEBUG_QUEUE_RETURN_OK)
+    {
+        if (debug_TaskHandle != NULL)
+        {
+            vTaskNotifyGiveFromISR(debug_TaskHandle, &higherPriorityTaskWoken);
+            portYIELD_FROM_ISR(higherPriorityTaskWoken);
+        }
+    }
+}
+
+
+void ModuleDebug_Init()
+{
+    debug_RequestQueue.front = 0u;
+    debug_RequestQueue.rear = 0u;
+    debug_RxPacketLength = 0U;
+    debug_TaskHandle = NULL;
 }
 
 
@@ -185,14 +221,12 @@ void ModuleDebug_ReceiveFromISR(const uint8 *data)
 void ModuleDebug_Task(void *argument)
 {
     (void)argument;
+    debug_TaskHandle = xTaskGetCurrentTaskHandle();
 
     for (;;)
     {
-        /* 요청이 들어올 때까지 대기 */
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
         /* 현재 큐에 있는 요청을 가능한 만큼 모두 처리 */
-        while (ModuleDebug_RequestQueue_Pop() == DEBUG_QUEUE_RETURN_OK)
+        while (ModuleDebug_Queue_Pop() == DEBUG_QUEUE_RETURN_OK)
         {
             DebugRequest_t l_CurrRequest = debug_CurrRequest;
             DebugCommand_e l_command = l_CurrRequest.command;
@@ -201,6 +235,10 @@ void ModuleDebug_Task(void *argument)
             {
                 case DEBUG_CMD_READ:
                     ModuleDebug_ReadProcess(l_CurrRequest);
+                    break;
+
+                case DEBUG_CMD_READ_MULTI:
+                    ModuleDebug_MultiReadProcess(l_CurrRequest);
                     break;
 
                 case DEBUG_CMD_WRITE:
@@ -212,6 +250,9 @@ void ModuleDebug_Task(void *argument)
                     break;
             }
         }
+
+        /* 큐가 비었으면 다음 요청 알림까지 대기합니다. */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 
 }
@@ -223,7 +264,7 @@ void ModuleDebug_ReadProcess(DebugRequest_t p_request)
     uint32 l_length = p_request.length;
     uint32 l_sequence = p_request.sequence;
     bool l_isValidAddress = ModuleDebug_IsValidAddress(l_address, l_length);
-    bool l_isValidRequest = false;
+    bool l_isValidRequest = true;
 
 
     DebugCommandStatus_e l_CmdStatus = DEBUG_CMD_STATUS_NONE;
@@ -238,34 +279,97 @@ void ModuleDebug_ReadProcess(DebugRequest_t p_request)
         case DEBUG_CMD_INFO:
             break;
         default:
+            l_isValidRequest = false;
             l_CmdStatus = DEBUG_CMD_STATUS_INVALID_COMMAND;
             break;
     }
 
-
-    /* 요청된 주소와 길이가 유효한지 확인 */
-    if (l_isValidAddress)
-    {
-        l_isValidRequest = true;
-        l_CmdStatus = DEBUG_CMD_STATUS_OK;
-    }
-    else
-    {
-        l_isValidRequest = false;
-        l_CmdStatus = DEBUG_CMD_STATUS_INVALID_ADDRESS;
-    }
-
     /* 패킷에 데이터 저장 가능한 길이 확인 */
-    if (l_length > DEBUG_RESPONSE_DATA_SIZE)
+    if ((l_isValidRequest == true) && (l_length > DEBUG_RESPONSE_DATA_SIZE))
     {
         l_isValidRequest = false;
         l_CmdStatus = DEBUG_CMD_STATUS_INVALID_LENGTH;
     }
 
+    /* 요청된 주소와 길이가 유효한지 확인 */
+    if ((l_isValidRequest == true) && (l_isValidAddress == false))
+    {
+        l_isValidRequest = false;
+        l_CmdStatus = DEBUG_CMD_STATUS_INVALID_ADDRESS;
+    }
 
+    if (l_isValidRequest == true)
+    {
+        l_CmdStatus = DEBUG_CMD_STATUS_OK;
+    }
+
+    p_request.sequence = l_sequence & DEBUG_SEQUENCE_MAX;
 
     /* GUI로 응답 전송 */
     ModuleDebug_SendResponse(l_CmdStatus, p_request);
+}
+
+static void ModuleDebug_MultiReadProcess(DebugRequest_t p_request)
+{
+    DebugCommandStatus_e status = DEBUG_CMD_STATUS_OK;
+    uint32 itemIdx;
+    uint32 dataOffset = DEBUG_MULTI_RESPONSE_HEADER_SIZE;
+    uint32 totalLength = 0U;
+
+    if ((p_request.itemCount == 0U)
+        || (p_request.itemCount > DEBUG_MULTI_MAX_ITEMS))
+    {
+        status = DEBUG_CMD_STATUS_INVALID_LENGTH;
+    }
+
+    for (itemIdx = 0U;
+         (itemIdx < p_request.itemCount) && (status == DEBUG_CMD_STATUS_OK);
+         itemIdx++)
+    {
+        uint32 itemLength = p_request.items[itemIdx].length;
+        uint32 itemAddress = p_request.items[itemIdx].address;
+
+        if ((itemLength == 0U) || (itemLength > DEBUG_RESPONSE_DATA_SIZE)
+            || ((totalLength + itemLength) > DEBUG_MULTI_MAX_DATA_SIZE))
+        {
+            status = DEBUG_CMD_STATUS_INVALID_LENGTH;
+        }
+        else if (ModuleDebug_IsValidAddress(itemAddress, itemLength) == false)
+        {
+            status = DEBUG_CMD_STATUS_INVALID_ADDRESS;
+        }
+        else
+        {
+            totalLength += itemLength;
+        }
+    }
+
+    debug_MultiTxBuffer[0] = (uint8)DEBUG_CMD_READ_MULTI;
+    debug_MultiTxBuffer[1] = (uint8)status;
+    debug_MultiTxBuffer[2] = (uint8)(p_request.sequence & 0xFFU);
+    debug_MultiTxBuffer[3] = (uint8)((p_request.sequence >> 8U) & 0x07U);
+    debug_MultiTxBuffer[4] = (uint8)p_request.itemCount;
+    debug_MultiTxBuffer[5] = (status == DEBUG_CMD_STATUS_OK)
+                           ? (uint8)totalLength : 0U;
+
+    if (status == DEBUG_CMD_STATUS_OK)
+    {
+        for (itemIdx = 0U; itemIdx < p_request.itemCount; itemIdx++)
+        {
+            const uint8 *source = (const uint8 *)p_request.items[itemIdx].address;
+            uint32 byteIdx;
+
+            for (byteIdx = 0U; byteIdx < p_request.items[itemIdx].length; byteIdx++)
+            {
+                debug_MultiTxBuffer[dataOffset] = source[byteIdx];
+                dataOffset++;
+            }
+        }
+    }
+
+    ModuleDebug_Req_Transmit(debug_MultiTxBuffer,
+                            (uint16)(DEBUG_MULTI_RESPONSE_HEADER_SIZE
+                                     + debug_MultiTxBuffer[5]));
 }
 
 static bool ModuleDebug_IsValidAddress(uint32 address, uint32 length)
@@ -316,7 +420,7 @@ static void ModuleDebug_SendResponse(DebugCommandStatus_e p_CmdStatus, DebugRequ
     }
 
     /* 최종 패킷 USB CDC로 전송 */
-    ModuleDebug_Transmit((const uint8 *)&debug_TxBuffer, (uint16)sizeof(debug_TxBuffer));
+    ModuleDebug_Req_Transmit((const uint8 *)&debug_TxBuffer, (uint16)sizeof(debug_TxBuffer));
 }
 
 
@@ -324,16 +428,3 @@ void ModuleDebug_WriteProcess(DebugRequest_t p_request)
 {
     
 }
-
-void ModuleDebug_Init()
-{
-    debug_RequestQueue.front = 0u;
-    debug_RequestQueue.rear = 0u;
-}
-
-
-
-
-
-
-

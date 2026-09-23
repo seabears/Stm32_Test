@@ -4,15 +4,27 @@
 #include "Module_Util_typedef.h"
 
 #define DEBUG_RESPONSE_DATA_SIZE 8U
+#define DEBUG_MULTI_MAX_ITEMS 8U
+#define DEBUG_MULTI_MAX_DATA_SIZE 58U
 
+/* 디버그 명령 종류 */
 typedef enum
 {
-    DEBUG_CMD_NONE  = 0,
-    DEBUG_CMD_PING  = 'P',
-    DEBUG_CMD_INFO  = 'I',
-    DEBUG_CMD_READ  = 'R',
-    DEBUG_CMD_WRITE = 'W'
+    DEBUG_CMD_NONE = 0,
+    DEBUG_CMD_PING,
+    DEBUG_CMD_INFO,
+    DEBUG_CMD_READ,
+    DEBUG_CMD_WRITE,
+    DEBUG_CMD_READ_MULTI,
+    DEBUG_CMD_MAX
 } DebugCommand_e;
+
+typedef struct
+{
+    uint32 address;
+    uint32 length;
+} DebugReadItem_t;
+
 
 typedef enum
 {
@@ -23,7 +35,21 @@ typedef enum
     DEBUG_CMD_STATUS_INVALID_COMMAND
 } DebugCommandStatus_e;
 
-/* STM32에서 GUI로 보내는 12바이트 디버그 응답 패킷입니다. */
+/* 파싱된 디버그 요청 정보 */
+typedef struct
+{
+    uint32 sequence;    /* 명령 시퀀스 번호 */
+    DebugCommand_e command; /* 디버그 명령 종류 */
+    uint32 address;     /* 명령 대상 주소 */
+    uint32 length;      /* 대상의 길이 (byte) */
+    DebugCommandStatus_e status;        /* 명령 처리 성공 여부 */
+    uint32 itemCount;
+    DebugReadItem_t items[DEBUG_MULTI_MAX_ITEMS];
+} DebugRequest_t;
+
+
+
+/* Stm32 -> GUI 12바이트 디버그 응답 패킷 */
 typedef struct
 {
     uint32 command  : 8;

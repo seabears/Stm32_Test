@@ -8,6 +8,9 @@
 #include "main.h"
 
 #define TASK_STACK_WORDS 128U
+#define DEBUG_TASK_STACK_WORDS 512U
+
+static volatile uint32 Task1msHeartbeat = 0U;
 
 static void Task1ms(void *argument);
 static void Task10ms(void *argument);
@@ -17,6 +20,8 @@ static void Task1000ms(void *argument);
 void ModuleFreeRtos_Start(void)
 {
   BaseType_t result;
+
+  ModuleDebug_Init();
 
   result = xTaskCreate(Task1ms, "task1ms", TASK_STACK_WORDS, NULL,
                        tskIDLE_PRIORITY + 4U, NULL);
@@ -41,6 +46,13 @@ void ModuleFreeRtos_Start(void)
 
   result = xTaskCreate(Task1000ms, "task1000ms", TASK_STACK_WORDS, NULL,
                        tskIDLE_PRIORITY + 1U, NULL);
+  if (result != pdPASS)
+  {
+    Error_Handler();
+  }
+
+  result = xTaskCreate(ModuleDebug_Task, "debug", DEBUG_TASK_STACK_WORDS, NULL,
+                       tskIDLE_PRIORITY + 2U, NULL);
   if (result != pdPASS)
   {
     Error_Handler();
@@ -76,6 +88,8 @@ static void Task1ms(void *argument)
     {
       i = 0U;
     }
+
+    Task1msHeartbeat++;
   }
 }
 
@@ -99,7 +113,7 @@ static void Task100ms(void *argument)
   for (;;)
   {
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(100U));
-    /* Add 100 ms work here. */
+    ModuleDebug_UpdateTestVariables();
   }
 }
 
@@ -120,13 +134,7 @@ static void Task1000ms(void *argument)
     }
 
     /* PC가 COM 포트를 열 시간을 준 뒤 테스트 패킷을 정확히 한 번 전송합니다. */
-    if ((testPacketSent == 0U) && (testDelaySeconds >= 10U))
-    {
-      if (ModuleDebug_SendTestResponse() == MODULE_DEBUG_TRANSMIT_OK)
-      {
-        testPacketSent = 1U;
-      }
-    }
+    (void)testPacketSent;
   }
 }
 

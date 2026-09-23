@@ -29,9 +29,10 @@ uint8_t ModuleUsb_Write(const uint8_t *data, uint16_t length);
 
 /*
  * printf 형식 문자열을 USB CDC로 출력합니다.
- * 내부 고정 버퍼 크기는 128바이트이므로 긴 문자열은 잘려서 전송될 수 있습니다.
+ * %d, %u, %x, %s, %c, %f 및 폭/정밀도 형식을 지원합니다.
+ * 반환값은 전송한 문자 수이며, 실패하면 음수를 반환합니다.
  */
-void ModuleUsb_Printf(const char *format, ...);
+int ModuleUsb_Print(const char *format, ...);
 
 #ifdef __cplusplus
 }

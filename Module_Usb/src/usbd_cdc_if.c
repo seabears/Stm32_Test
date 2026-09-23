@@ -1,5 +1,6 @@
 #include "usbd_cdc_if.h"
 #include "usb_device.h"
+#include "Module_Debug.h"
 
 static int8_t CDC_Init_FS(void);
 static int8_t CDC_DeInit_FS(void);
@@ -22,6 +23,15 @@ USBD_CDC_ItfTypeDef USBD_Interface_fops_FS =
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
+/* USB CDC 기본 통신 설정: 115200 baud, 1 stop bit, no parity, 8 data bits. */
+static uint8_t CdcLineCoding[7] =
+{
+  0x00U, 0xC2U, 0x01U, 0x00U,
+  0x00U,
+  0x00U,
+  0x08U
+};
+
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
 static int8_t CDC_Init_FS(void)
@@ -40,8 +50,7 @@ static int8_t CDC_DeInit_FS(void)
 
 static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
 {
-  (void)pbuf;
-  (void)length;
+  uint16_t index;
 
   /*
    * 호스트가 CDC ACM 제어 요청을 보낼 때 호출됩니다.
@@ -57,7 +66,25 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
     case CDC_GET_COMM_FEATURE:
     case CDC_CLEAR_COMM_FEATURE:
     case CDC_SET_LINE_CODING:
+      if ((pbuf != NULL) && (length >= sizeof(CdcLineCoding)))
+      {
+        for (index = 0U; index < sizeof(CdcLineCoding); index++)
+        {
+          CdcLineCoding[index] = pbuf[index];
+        }
+      }
+      break;
+
     case CDC_GET_LINE_CODING:
+      if (pbuf != NULL)
+      {
+        for (index = 0U; index < sizeof(CdcLineCoding); index++)
+        {
+          pbuf[index] = CdcLineCoding[index];
+        }
+      }
+      break;
+
     case CDC_SET_CONTROL_LINE_STATE:
     case CDC_SEND_BREAK:
     default:
@@ -69,14 +96,15 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t *pbuf, uint16_t length)
 
 static int8_t CDC_Receive_FS(uint8_t *Buf, uint32_t *Len)
 {
-  (void)Buf;
-  (void)Len;
-
   /*
    * 호스트에서 OUT 데이터가 들어오면 호출됩니다.
-   * 현재는 수신 데이터를 사용하지 않고, 다음 패킷을 받을 수 있도록 같은 RX 버퍼를 다시 등록합니다.
-   * 수신 명령을 처리하려면 Buf와 Len을 이 지점에서 해석하면 됩니다.
+   * 디버그 모듈에 수신 조각을 전달한 뒤 다음 USB 패킷을 받을 수 있도록 재등록합니다.
    */
+  if ((Buf != NULL) && (Len != NULL))
+  {
+    ModuleDebug_ReceiveFromISR(Buf, *Len);
+  }
+
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, UserRxBufferFS);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);

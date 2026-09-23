@@ -1,0 +1,162 @@
+{
+    "version":  "2.0.0",
+    "tasks":  [
+                  {
+                      "label":  "STM32: Build",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "-j12",
+                                   "all"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "group":  {
+                                    "kind":  "build",
+                                    "isDefault":  true
+                                },
+                      "problemMatcher":  "$gcc"
+                  },
+                  {
+                      "label":  "STM32: Flash [STLink]",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "flash"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "dependsOn":  "STM32: Build",
+                      "group":  "build",
+                      "problemMatcher":  "$gcc"
+                  },
+                  {
+                      "label":  "STM32: USB Flash Wait",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "usb-flash-wait"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "dependsOn":  "STM32: Build",
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ]
+                  },
+                  {
+                      "label":  "STM32: Clean",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "clean"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ]
+                  },
+                  {
+                      "label":  "STM32: Rebuild",
+                      "type":  "shell",
+                      "dependsOrder":  "sequence",
+                      "dependsOn":  [
+                                        "STM32: Clean",
+                                        "STM32: Build"
+                                    ],
+                      "group":  "build",
+                      "problemMatcher":  "$gcc"
+                  },
+                  {
+                      "label":  "STM32: Reset [STLink]",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "reset"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ]
+                  },
+                  {
+                      "label":  "STM32: Halt [STLink]",
+                      "type":  "shell",
+                      "command":  "make",
+                      "args":  [
+                                   "halt"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}"
+                                  },
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ]
+                  },
+                  {
+                      "label":  "BootLoader: Build",
+                      "type":  "shell",
+                      "group":  "build",
+                      "problemMatcher":  "$gcc",
+                      "command":  "make",
+                      "args":  [
+                                   "-j12",
+                                   "all"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}\\Bootloader_DFU_Min"
+                                  }
+                  },
+                  {
+                      "label":  "BootLoader: Flash [STLink]",
+                      "type":  "shell",
+                      "dependsOn":  "BootLoader: Build",
+                      "group":  "build",
+                      "problemMatcher":  "$gcc",
+                      "command":  "make",
+                      "args":  [
+                                   "flash"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}\\Bootloader_DFU_Min"
+                                  }
+                  },
+                  {
+                      "label":  "BootLoader: Clean",
+                      "type":  "shell",
+                      "group":  "build",
+                      "problemMatcher":  [
+
+                                         ],
+                      "command":  "make",
+                      "args":  [
+                                   "clean"
+                               ],
+                      "options":  {
+                                      "cwd":  "${workspaceFolder}\\Bootloader_DFU_Min"
+                                  }
+                  },
+                  {
+                      "label":  "BootLoader: Rebuild",
+                      "type":  "shell",
+                      "dependsOrder":  "sequence",
+                      "dependsOn":  [
+                                        "BootLoader: Clean",
+                                        "BootLoader: Build"
+                                    ],
+                      "group":  "build",
+                      "problemMatcher":  "$gcc"
+                  }
+              ]
+}

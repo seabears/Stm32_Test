@@ -7,7 +7,15 @@
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
 
+#define MODULE_USB_PRINT_BUFFER_SIZE 256U
+#define MODULE_USB_PRINT_TIMEOUT_MS  100U
+
 static void ModuleUsb_ForceDisconnect(void);
+static uint8_t ModuleUsb_WaitForTxIdle(uint32_t timeoutMs);
+
+static char ModuleUsb_PrintBuffer[MODULE_USB_PRINT_BUFFER_SIZE];
+
+extern USBD_HandleTypeDef hUsbDeviceFS;
 
 void ModuleUsb_Init(void)
 {
@@ -34,30 +42,79 @@ uint8_t ModuleUsb_Write(const uint8_t *data, uint16_t length)
   return CDC_Transmit_FS((uint8_t *)data, length);
 }
 
-void ModuleUsb_Printf(const char *format, ...)
+int ModuleUsb_Print(const char *format, ...)
 {
-  char buffer[128];
   va_list args;
   int length;
+  uint8_t usbResult;
 
-  /* 가변 인자를 고정 크기 버퍼에 포맷합니다. 임베디드 환경이라 heap 사용은 피합니다. */
+  if (format == NULL)
+  {
+    return -1;
+  }
+
+  /* 이전 비동기 송신이 정적 출력 버퍼를 더 이상 사용하지 않을 때까지 기다립니다. */
+  if (ModuleUsb_WaitForTxIdle(MODULE_USB_PRINT_TIMEOUT_MS) != USBD_OK)
+  {
+    return -1;
+  }
+
   va_start(args, format);
-  length = vsnprintf(buffer, sizeof(buffer), format, args);
+  length = vsnprintf(ModuleUsb_PrintBuffer,
+                     sizeof(ModuleUsb_PrintBuffer),
+                     format,
+                     args);
   va_end(args);
 
-  /* 포맷 실패 또는 빈 문자열이면 전송하지 않습니다. */
-  if (length <= 0)
+  if (length < 0)
   {
-    return;
+    return -1;
   }
 
-  /* vsnprintf 결과가 버퍼보다 길면 실제 전송 가능한 크기로 제한합니다. */
-  if (length > (int)sizeof(buffer))
+  if (length >= (int)sizeof(ModuleUsb_PrintBuffer))
   {
-    length = (int)sizeof(buffer);
+    length = (int)sizeof(ModuleUsb_PrintBuffer) - 1;
   }
 
-  (void)ModuleUsb_Write((const uint8_t *)buffer, (uint16_t)length);
+  usbResult = ModuleUsb_Write((const uint8_t *)ModuleUsb_PrintBuffer,
+                              (uint16_t)length);
+  if (usbResult != USBD_OK)
+  {
+    return -1;
+  }
+
+  /* 포맷 버퍼가 다음 호출에서 덮어써지기 전에 현재 송신을 끝냅니다. */
+  if (ModuleUsb_WaitForTxIdle(MODULE_USB_PRINT_TIMEOUT_MS) != USBD_OK)
+  {
+    return -1;
+  }
+
+  return length;
+}
+
+static uint8_t ModuleUsb_WaitForTxIdle(uint32_t timeoutMs)
+{
+  uint32_t startTick = HAL_GetTick();
+  USBD_CDC_HandleTypeDef *hcdc;
+
+  for (;;)
+  {
+    hcdc = (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
+    if (hcdc == NULL)
+    {
+      return USBD_FAIL;
+    }
+
+    if (hcdc->TxState == 0U)
+    {
+      return USBD_OK;
+    }
+
+    if ((HAL_GetTick() - startTick) >= timeoutMs)
+    {
+      return USBD_BUSY;
+    }
+  }
 }
 
 int _write(int file, char *ptr, int len)

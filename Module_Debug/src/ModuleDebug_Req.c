@@ -3,7 +3,8 @@
 #include "Module_Usb.h"
 #include "usbd_def.h"
 
-ModuleDebugTransmitResult_e ModuleDebug_Transmit(const uint8 *p_data,
+
+ModuleDebugTransmitResult_e ModuleDebug_Req_Transmit(const uint8 *p_data,
                                                  uint16 p_length)
 {
     uint8 l_usbResult;

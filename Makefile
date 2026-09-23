@@ -30,7 +30,10 @@ C_SRCS := \
 Core/Src/main.c \
 Module_FreeRtos/src/Module_FreeRtos.c \
 Module_Usb/src/Module_Usb.c \
+Module_Util/src/Module_Util.c \
 Module_Debug/src/ModuleDebug_Req.c \
+Module_Debug/src/ModuleDebug_Queue.c \
+Module_Debug/src/Module_Debug.c \
 Module_Debug/src/ModuleDebug_Test.c \
 Core/Src/stm32f1xx_hal_msp.c \
 Core/Src/stm32f1xx_it.c \
@@ -102,9 +105,9 @@ INCLUDES := \
 -IDrivers/CMSIS/Device/ST/STM32F1xx/Include \
 -IDrivers/CMSIS/Include
 
-CFLAGS := $(CPU_FLAGS) -std=gnu11 -g3 $(DEFINES) -c $(INCLUDES) -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity --specs=nano.specs
+CFLAGS := $(CPU_FLAGS) -std=gnu11 -g3 $(DEFINES) -c $(INCLUDES) -O2 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity --specs=nano.specs
 ASFLAGS := $(CPU_FLAGS) -g3 -DDEBUG -c -x assembler-with-cpp --specs=nano.specs
-LDFLAGS := $(CPU_FLAGS) -T"$(LINKER_SCRIPT)" --specs=nosys.specs -Wl,-Map="$(MAP)" -Wl,--gc-sections -static --specs=nano.specs -Wl,--start-group -lc -lm -Wl,--end-group
+LDFLAGS := $(CPU_FLAGS) -T"$(LINKER_SCRIPT)" --specs=nosys.specs -Wl,-Map="$(MAP)" -Wl,--gc-sections -Wl,-u,_printf_float -static --specs=nano.specs -Wl,--start-group -lc -lm -Wl,--end-group
 
 .PHONY: all main-build clean secondary-outputs flash flash-bootloader usb-flash usb-flash-wait reset halt
 
