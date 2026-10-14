@@ -1,6 +1,6 @@
 # STM32F103C8T6 Mini 기본 빌드 환경
 
-새 기능 개발의 시작점: `codex/stm32f103c8t6-mini-build`.
+새 기능 개발의 시작점: `Build`.
 기존 프로젝트의 HAL/CMSIS와 GCC 시작 코드를 사용한다.
 
 - Cortex-M3, Flash 64 KB, RAM 20 KB.
